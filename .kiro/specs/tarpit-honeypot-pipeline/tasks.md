@@ -80,7 +80,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - **Validates: Requirements 7.5**
     - Generate messages where ≥80% tokens are injection patterns; assert is_fully_blocked returns True
 
-- [ ] 3. Checkpoint - Ensure all tests pass
+- [x] 3. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 4. Implement Persona Engine component
@@ -92,17 +92,17 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Include stalling tactics: repeat requests, irrelevant anecdotes, technology confusion, unnecessary clarifications
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 7.3, 7.4, 7.6_
 
-  - [ ] 4.2 Write property tests for Persona Engine in `tests/test_threat_parser.py` (or `tests/test_persona_properties.py`)
+  - [x] 4.2 Write property tests for Persona Engine in `tests/test_threat_parser.py` (or `tests/test_persona_properties.py`)
     - **Property 1: Persona Response Word Count Bounds**
     - **Validates: Requirements 1.1**
     - Test fallback responses and generated responses have 20-300 words
 
-  - [ ] 4.3 Write property test for character consistency in `tests/test_persona_properties.py`
+  - [x] 4.3 Write property test for character consistency in `tests/test_persona_properties.py`
     - **Property 2: Persona Character Consistency**
     - **Validates: Requirements 1.2, 1.3**
     - Verify responses don't acknowledge AI identity, use correct jargon, or provide actionable instructions
 
-  - [ ] 4.4 Write property test for stalling tactic inclusion in `tests/test_persona_properties.py`
+  - [x] 4.4 Write property test for stalling tactic inclusion in `tests/test_persona_properties.py`
     - **Property 3: Persona Stalling Tactic Inclusion**
     - **Validates: Requirements 1.4**
     - Verify each response contains at least one stalling tactic
@@ -158,44 +158,44 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Log rejections for failed checksums or invalid lengths
     - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
 
-  - [ ] 6.5 Implement async extraction orchestration in `components/threat_parser.py`
+  - [x] 6.5 Implement async extraction orchestration in `components/threat_parser.py`
     - Implement `ThreatParser.extract_iocs(message) -> ExtractionResult` (async, 5s timeout)
     - Orchestrate all four extraction methods concurrently
     - Combine results into ExtractionResult with both iocs and rejections
     - Handle timeouts gracefully with partial results
     - _Requirements: 8.4, 8.5_
 
-  - [ ] 6.6 Write property test for cryptocurrency extraction in `tests/test_threat_parser.py`
+  - [x] 6.6 Write property test for cryptocurrency extraction in `tests/test_threat_parser.py`
     - **Property 6: Cryptocurrency Wallet Extraction Correctness**
     - **Validates: Requirements 3.1, 3.2**
     - Generate valid Bitcoin (Base58Check, Bech32) and Ethereum addresses; embed in messages; assert extraction with correct wallet_type
 
-  - [ ] 6.7 Write property tests for domain normalization in `tests/test_threat_parser.py`
+  - [x] 6.7 Write property tests for domain normalization in `tests/test_threat_parser.py`
     - **Property 8: Domain Normalization Idempotence**
     - **Validates: Requirements 4.2, 4.5**
     - Generate valid domain strings; assert normalize(normalize(d)) == normalize(d)
 
-  - [ ] 6.8 Write property test for domain deduplication in `tests/test_threat_parser.py`
+  - [x] 6.8 Write property test for domain deduplication in `tests/test_threat_parser.py`
     - **Property 9: Domain Deduplication**
     - **Validates: Requirements 4.4**
     - Submit same domain N times; assert exactly one entry in IoC list
 
-  - [ ] 6.9 Write property tests for phone number normalization in `tests/test_threat_parser.py`
+  - [x] 6.9 Write property tests for phone number normalization in `tests/test_threat_parser.py`
     - **Property 10: Phone Number Normalization Idempotence**
     - **Validates: Requirements 5.4**
     - Generate valid E.164 numbers; assert normalize(e164) == e164
 
-  - [ ] 6.10 Write property test for phone false-positive prevention in `tests/test_threat_parser.py`
+  - [x] 6.10 Write property test for phone false-positive prevention in `tests/test_threat_parser.py`
     - **Property 11: Phone Number False-Positive Prevention**
     - **Validates: Requirements 5.5**
     - Generate 7-15 digit sequences without separators or plus prefix; assert no extraction
 
-  - [ ] 6.11 Write property test for mule account proximity extraction in `tests/test_threat_parser.py`
+  - [x] 6.11 Write property test for mule account proximity extraction in `tests/test_threat_parser.py`
     - **Property 13: Mule Account Proximity Extraction**
     - **Validates: Requirements 6.1, 6.5**
     - Generate valid triplets (bank name + account + valid routing) within 500 chars; assert extraction
 
-- [ ] 7. Checkpoint - Ensure all tests pass
+- [x] 7. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 8. Implement IoC Lookup MCP Client
@@ -226,7 +226,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Route: PhishingDomain → WAF; CryptoWallet → GuardDuty HIGH "CryptoCurrency:EC2/BitcoinTool.B"; MuleBankAccount → GuardDuty CRITICAL "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration"; PhoneNumber → GuardDuty MEDIUM "Recon:EC2/PortProbeUnprotectedPort"
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
-  - [ ]* 9.2 Write property test for notification routing in `tests/test_models.py`
+  - [ ] 9.2 Write property test for notification routing in `tests/test_models.py`
     - **Property 18: Notification Routing Correctness**
     - **Validates: Requirements 10.1, 10.2, 10.3, 10.4**
     - Generate valid IoCs of each category; assert correct severity and finding type in generated payload
@@ -273,7 +273,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Wire `st.rerun()` for real-time IoC appearance after async extraction
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
 
-  - [ ]* 12.4 Write property test for pipeline error resilience in `tests/test_threat_parser.py`
+  - [ ] 12.4 Write property test for pipeline error resilience in `tests/test_threat_parser.py`
     - **Property 17: Pipeline Error Resilience**
     - **Validates: Requirements 8.5**
     - Generate random Chat_State; inject exceptions at each pipeline stage; assert pre-existing data unchanged
