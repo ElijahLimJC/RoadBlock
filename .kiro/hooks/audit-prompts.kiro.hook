@@ -1,18 +1,15 @@
 {
+  "name": "Prompt Security Audit",
   "version": "1.0.0",
-  "enabled": true,
-  "name": "audit_prompts",
+  "description": "Verifies persona_engine.py prompt guardrails whenever the file is modified",
   "when": {
     "type": "fileEdited",
     "patterns": [
-      "/Users/9Elijah_Lim/Downloads/kiro/components/persona_engine.py"
+      "**/persona_engine.py"
     ]
   },
   "then": {
     "type": "runCommand",
-    "command": "{\n  \"enabled\": true,\n  \"name\": \"Prompt Security Sanitizer\",\n  \"description\": \"Automatically verifies system prompt guardrails whenever personas.py is modified\",\n  \"version\": \"1\",\n  \"trigger\": {\n    \"type\": \"fileChange\",\n    \"path\": \"personas.py\",\n    \"event\": \"onSave\"\n  },\n  \"action\": {\n    \"type\": \"command\",\n    \"command\": \"python\",\n    \"args\": [\"settings/scripts/check_prompt_boundaries.py\"]\n  }\n}"
-  },
-  "workspaceFolderName": "kiro",
-  "shortName": "audit-prompts",
-  "description": "ensure that persona_engine prompt is safe during changes of the prompt"
+    "command": "cd /Users/9Elijah_Lim/Downloads/kiro && python settings/scripts/check_prompt_boundaries.py"
+  }
 }

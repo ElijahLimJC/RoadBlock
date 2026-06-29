@@ -1,8 +1,7 @@
 {
-  "enabled": true,
   "name": "Threat Parser Regression Check",
-  "description": "Runs a quick regression test against a static block of messy scam data whenever the threat parser is saved, catching breakages before they hit the Streamlit runtime.",
-  "version": "1",
+  "version": "1.0.0",
+  "description": "Runs a quick regression test against static scam data whenever the threat parser is saved, catching breakages before they hit the Streamlit runtime.",
   "when": {
     "type": "fileEdited",
     "patterns": [
@@ -11,8 +10,6 @@
   },
   "then": {
     "type": "runCommand",
-    "command": "cd /Users/9Elijah_Lim/Downloads/kiro && python -c \"\\nimport sys\\nsys.path.insert(0, '.')\\n\\nSCAM_BLOCK = '''\\nHey grandma send BTC to 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa or bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4\\nAlso try my ethereum 0xde0B295669a9FD93d5F28D9Ec85E40f4cb697BAe\\nCall me at +1-555-867-5309 or (555) 234.5678\\nVisit http://phishing-scam.evil.com/login or malware.bad-domain.ru/payload.exe\\nMy cash app $ScammerDude99\\nBank transfer to sort 12-34-56 acc 12345678\\nAlternate BTC: 3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy!!!\\nSend XRP to rN7hbM4gCr3sortBXnGPgv8txVeHjVqQCP maybe???\\n'''\\n\\ntry:\\n    from components.threat_parser import extract_iocs\\n    results = extract_iocs(SCAM_BLOCK)\\n    if results is None:\\n        results = []\\n    print(f'OK: Extracted {len(results)} IoCs from scam block')\\n    if len(results) == 0:\\n        print('WARNING: Zero IoCs extracted - parser may be broken')\\n        sys.exit(1)\\nexcept ImportError:\\n    print('SKIP: threat_parser not yet implemented')\\n    sys.exit(0)\\nexcept Exception as e:\\n    print(f'FAIL: Parser crashed on scam data: {e}')\\n    sys.exit(1)\\n\""
-  },
-  "workspaceFolderName": "kiro",
-  "shortName": "threat-parser-regression"
+    "command": "cd /Users/9Elijah_Lim/Downloads/kiro && python settings/scripts/threat_parser_regression.py"
+  }
 }
