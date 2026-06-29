@@ -1,0 +1,33 @@
+[project]
+name = "roadblock"
+version = "0.1.0"
+description = "Automated social honeypot pipeline — intercepts scammer communications, wastes their time with an AI-driven confused elder persona, and extracts validated Threat Intelligence IoCs in real time."
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "RoadBlock Team"}
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["components", "models", "dashboard"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
