@@ -10,6 +10,6 @@
   },
   "then": {
     "type": "runCommand",
-    "command": "cd /Users/9Elijah_Lim/Downloads/kiro && python settings/scripts/threat_parser_regression.py"
+    "command": "cd /Users/9Elijah_Lim/Downloads/kiro && conda run -n roadblock python settings/scripts/threat_parser_regression.py"
   }
 }

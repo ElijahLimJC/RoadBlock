@@ -141,7 +141,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Log rejections for invalid domains
     - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
 
-  - [ ] 6.3 Implement phone number extraction in `components/threat_parser.py`
+  - [x] 6.3 Implement phone number extraction in `components/threat_parser.py`
     - Implement `ThreatParser.extract_phone_numbers(text) -> list[PhoneNumberIoC]`
     - Only consider digit sequences with recognized separators (spaces, hyphens, dots, parentheses) or explicit plus prefix
     - Normalize to E.164 format using `phonenumbers` library
@@ -149,7 +149,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Log rejections with specific reasons
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
 
-  - [ ] 6.4 Implement mule bank account extraction in `components/threat_parser.py`
+  - [x] 6.4 Implement mule bank account extraction in `components/threat_parser.py`
     - Implement `ThreatParser.extract_mule_accounts(text) -> list[MuleBankAccountIoC]`
     - Detect bank name, account number (4-17 digits), and routing number within 500-character proximity
     - Validate ABA checksum on routing number (weights [3,7,1,3,7,1,3,7,1], sum mod 10 == 0)
@@ -208,12 +208,12 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Handle graceful degradation: connection refused, timeout, invalid response format all result in `lookup_status="unknown"`
     - _Requirements: 3.4, 6.6_
 
-  - [ ]* 8.2 Write property test for MCP graceful degradation in `tests/test_threat_parser.py`
+  - [ ] 8.2 Write property test for MCP graceful degradation in `tests/test_threat_parser.py`
     - **Property 19: MCP Lookup Graceful Degradation**
     - **Validates: Requirements 3.4, 6.6**
     - Simulate server failures; assert IoC stored with lookup_status="unknown" and all fields intact
 
-  - [ ]* 8.3 Write property test for MCP lookup idempotence in `tests/test_threat_parser.py`
+  - [ ] 8.3 Write property test for MCP lookup idempotence in `tests/test_threat_parser.py`
     - **Property 20: MCP Lookup Idempotence**
     - **Validates: Requirements 4.4**
     - Look up same IoC value twice; assert cached result returned without duplicate server call
