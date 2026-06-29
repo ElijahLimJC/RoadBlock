@@ -80,6 +80,7 @@
 
 ## Git & Commits
 
+- **Commit early, commit often** — every meaningful change (new function, passing test, config tweak) gets its own commit immediately. Never let work accumulate uncommitted across multiple logical steps.
 - Commit messages follow Conventional Commits: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`
 - One logical change per commit — don't bundle unrelated edits
 - Branch naming: `feature/<short-slug>`, `fix/<short-slug>`, `chore/<short-slug>`
