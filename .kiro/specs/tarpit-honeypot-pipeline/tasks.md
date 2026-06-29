@@ -125,13 +125,13 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Generate random integers [0, 360000]; assert formatted output matches `f"{S//3600:02d}:{(S%3600)//60:02d}:{S%60:02d}"`
 
 - [ ] 6. Implement Threat Parser component
-  - [ ] 6.1 Implement cryptocurrency wallet extraction in `components/threat_parser.py`
+  - [x] 6.1 Implement cryptocurrency wallet extraction in `components/threat_parser.py`
     - Implement `ThreatParser.__init__` with regex patterns for Bitcoin (Base58Check, Bech32) and Ethereum addresses
     - Implement `ThreatParser.extract_crypto_wallets(text) -> list[CryptoWalletIoC]` with Base58Check checksum validation (addresses starting with 1 or 3), Bech32 checksum validation (bc1 prefix), and Ethereum hex validation (0x + 40 hex chars)
     - Log rejections for invalid checksums/formats to RejectionLogEntry
     - _Requirements: 3.1, 3.2, 3.3_
 
-  - [ ] 6.2 Implement phishing domain extraction in `components/threat_parser.py`
+  - [x] 6.2 Implement phishing domain extraction in `components/threat_parser.py`
     - Implement `ThreatParser.extract_phishing_domains(text) -> list[PhishingDomainIoC]`
     - Detect bare domains, full URLs, and defanged/obfuscated domains (hxxp, [.], [://])
     - Reverse defanging substitutions, extract domain component
@@ -165,32 +165,32 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Handle timeouts gracefully with partial results
     - _Requirements: 8.4, 8.5_
 
-  - [ ]* 6.6 Write property test for cryptocurrency extraction in `tests/test_threat_parser.py`
+  - [ ] 6.6 Write property test for cryptocurrency extraction in `tests/test_threat_parser.py`
     - **Property 6: Cryptocurrency Wallet Extraction Correctness**
     - **Validates: Requirements 3.1, 3.2**
     - Generate valid Bitcoin (Base58Check, Bech32) and Ethereum addresses; embed in messages; assert extraction with correct wallet_type
 
-  - [ ]* 6.7 Write property tests for domain normalization in `tests/test_threat_parser.py`
+  - [ ] 6.7 Write property tests for domain normalization in `tests/test_threat_parser.py`
     - **Property 8: Domain Normalization Idempotence**
     - **Validates: Requirements 4.2, 4.5**
     - Generate valid domain strings; assert normalize(normalize(d)) == normalize(d)
 
-  - [ ]* 6.8 Write property test for domain deduplication in `tests/test_threat_parser.py`
+  - [ ] 6.8 Write property test for domain deduplication in `tests/test_threat_parser.py`
     - **Property 9: Domain Deduplication**
     - **Validates: Requirements 4.4**
     - Submit same domain N times; assert exactly one entry in IoC list
 
-  - [ ]* 6.9 Write property tests for phone number normalization in `tests/test_threat_parser.py`
+  - [ ] 6.9 Write property tests for phone number normalization in `tests/test_threat_parser.py`
     - **Property 10: Phone Number Normalization Idempotence**
     - **Validates: Requirements 5.4**
     - Generate valid E.164 numbers; assert normalize(e164) == e164
 
-  - [ ]* 6.10 Write property test for phone false-positive prevention in `tests/test_threat_parser.py`
+  - [ ] 6.10 Write property test for phone false-positive prevention in `tests/test_threat_parser.py`
     - **Property 11: Phone Number False-Positive Prevention**
     - **Validates: Requirements 5.5**
     - Generate 7-15 digit sequences without separators or plus prefix; assert no extraction
 
-  - [ ]* 6.11 Write property test for mule account proximity extraction in `tests/test_threat_parser.py`
+  - [ ] 6.11 Write property test for mule account proximity extraction in `tests/test_threat_parser.py`
     - **Property 13: Mule Account Proximity Extraction**
     - **Validates: Requirements 6.1, 6.5**
     - Generate valid triplets (bank name + account + valid routing) within 500 chars; assert extraction
