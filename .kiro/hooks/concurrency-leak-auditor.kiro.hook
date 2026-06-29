@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Concurrency Leak Auditor",
+  "description": "On save of app.py or threat_parser.py, audits for concurrency leaks: unmanaged background threads, missing timeouts on async calls, bare asyncio.run() inside Streamlit's sync loop, and ThreadPoolExecutor usage without proper shutdown. Flags issues before they cause ghost threads or CPU lockups during page re-runs.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "app.py",
+      "components/threat_parser.py"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file critical to async orchestration was just saved. Audit it for concurrency leaks that could cause ghost threads or CPU lockups in Streamlit's synchronous re-run model. Check for:\n\n1. **Unmanaged ThreadPoolExecutor** — any executor that is not wrapped in a `with` block or does not call `shutdown(wait=False)`. Streamlit re-runs the entire script on each interaction, so leaked executors accumulate.\n2. **Missing timeouts** — any `asyncio.wait_for`, `asyncio.run_in_executor`, or `executor.submit` call without an explicit timeout. Default 30s per project conventions.\n3. **Bare `asyncio.run()` in top-level Streamlit flow** — this blocks the main thread and can deadlock if an event loop is already running. Prefer `asyncio.run_in_executor` or check for an existing loop.\n4. **`asyncio.create_task()` without task tracking** — fire-and-forget tasks become ghost coroutines on page re-run. All tasks must be stored and cancelled on session reset.\n5. **Thread spawning without daemon=True** — non-daemon threads prevent clean Streamlit shutdown.\n6. **No cancellation on session reset** — verify that `st.session_state` cleanup callbacks cancel pending futures/tasks.\n\nReport any findings as warnings with specific line references and suggested fixes. If no issues found, confirm the file is clean."
+  }
+}
