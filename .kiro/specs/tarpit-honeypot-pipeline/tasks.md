@@ -199,7 +199,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 8. Implement IoC Lookup MCP Client
-  - [ ] 8.1 Implement `components/ioc_lookup_mcp.py`
+  - [x] 8.1 Implement `components/ioc_lookup_mcp.py`
     - Implement `IoCLookupMCPClient.__init__(mcp_server_url, timeout=3.0)` with httpx async client
     - Implement `IoCLookupMCPClient.check_known_ioc(ioc_value, ioc_category) -> IoCLookupResult` with 3s timeout, returns unknown status on timeout/error
     - Implement `IoCLookupMCPClient.batch_check(iocs) -> list[IoCLookupResult]` for efficient multi-IoC lookup
@@ -208,31 +208,31 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Handle graceful degradation: connection refused, timeout, invalid response format all result in `lookup_status="unknown"`
     - _Requirements: 3.4, 6.6_
 
-  - [ ] 8.2 Write property test for MCP graceful degradation in `tests/test_threat_parser.py`
+  - [x] 8.2 Write property test for MCP graceful degradation in `tests/test_threat_parser.py`
     - **Property 19: MCP Lookup Graceful Degradation**
     - **Validates: Requirements 3.4, 6.6**
     - Simulate server failures; assert IoC stored with lookup_status="unknown" and all fields intact
 
-  - [ ] 8.3 Write property test for MCP lookup idempotence in `tests/test_threat_parser.py`
+  - [x] 8.3 Write property test for MCP lookup idempotence in `tests/test_threat_parser.py`
     - **Property 20: MCP Lookup Idempotence**
     - **Validates: Requirements 4.4**
     - Look up same IoC value twice; assert cached result returned without duplicate server call
 
 - [ ] 9. Implement Notification Module
-  - [ ] 9.1 Implement `components/notification_module.py`
+  - [x] 9.1 Implement `components/notification_module.py`
     - Implement `NotificationModule.generate_notification(ioc) -> MockAWSPayload` routing IoC to correct generator based on category
     - Implement `NotificationModule.generate_waf_payload(domain_ioc) -> WAFPayload` with Name="RoadBlock-PhishingDomains", Scope="REGIONAL", UUID Id, Addresses list, UUID LockToken
     - Implement `NotificationModule.generate_guardduty_payload(ioc, severity, finding_type) -> GuardDutyFinding` with SchemaVersion="2.0", AccountId, Region, Type, Resource, Service, Severity, Title, Description, CreatedAt
     - Route: PhishingDomain → WAF; CryptoWallet → GuardDuty HIGH "CryptoCurrency:EC2/BitcoinTool.B"; MuleBankAccount → GuardDuty CRITICAL "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration"; PhoneNumber → GuardDuty MEDIUM "Recon:EC2/PortProbeUnprotectedPort"
     - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5_
 
-  - [ ] 9.2 Write property test for notification routing in `tests/test_models.py`
+  - [x] 9.2 Write property test for notification routing in `tests/test_models.py`
     - **Property 18: Notification Routing Correctness**
     - **Validates: Requirements 10.1, 10.2, 10.3, 10.4**
     - Generate valid IoCs of each category; assert correct severity and finding type in generated payload
 
 - [ ] 10. Implement SOC Dashboard
-  - [ ] 10.1 Implement `dashboard/soc_dashboard.py`
+  - [x] 10.1 Implement `dashboard/soc_dashboard.py`
     - Implement `SOCDashboard.render(chat_state)` as main render method
     - Implement `SOCDashboard.render_conversation_log(messages)` displaying chat messages with sender attribution (scammer/persona), timestamps, chronological order
     - Implement `SOCDashboard.render_ioc_panel(iocs)` displaying IoCs grouped by category (Cryptocurrency Wallets, Phishing Domains, Phone Numbers, Mule Bank Accounts) with extracted values and known/new status indicators

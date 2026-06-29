@@ -321,3 +321,89 @@ class TestABARoutingNumberChecksum:
             assert "ABA checksum" in str(exc_info.value) or "routing" in str(
                 exc_info.value
             ).lower()
+
+
+# ---------------------------------------------------------------------------
+# Property 18: Notification Routing Correctness
+# ---------------------------------------------------------------------------
+
+
+class TestNotificationRoutingProperty:
+    """Property 18: Notification Routing Correctness.
+
+    **Validates: Requirements 10.1, 10.2, 10.3, 10.4**
+
+    For any valid IoC, the Notification_Module SHALL generate a payload with
+    the correct severity and finding type:
+    - PhishingDomain → WAF payload (payload_type="waf_ipset_update", severity="HIGH")
+    - CryptoWallet → GuardDuty HIGH, Type "CryptoCurrency:EC2/BitcoinTool.B"
+    - MuleBankAccount → GuardDuty CRITICAL, Type "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration"
+    - PhoneNumber → GuardDuty MEDIUM, Type "Recon:EC2/PortProbeUnprotectedPort"
+    """
+
+    @given(ioc=phishing_domain_iocs())
+    @settings(max_examples=200)
+    def test_phishing_domain_routes_to_waf_payload(
+        self, ioc: PhishingDomainIoC
+    ) -> None:
+        """PhishingDomainIoC generates a WAF IP set update with severity HIGH."""
+        from components.notification_module import NotificationModule
+
+        module = NotificationModule()
+        payload = module.generate_notification(ioc)
+
+        assert payload.payload_type == "waf_ipset_update"
+        assert payload.severity == "HIGH"
+
+    @given(ioc=crypto_wallet_iocs())
+    @settings(max_examples=200)
+    def test_crypto_wallet_routes_to_guardduty_high(
+        self, ioc: CryptoWalletIoC
+    ) -> None:
+        """CryptoWalletIoC generates GuardDuty finding with HIGH severity and correct Type."""
+        from components.notification_module import NotificationModule
+
+        module = NotificationModule()
+        payload = module.generate_notification(ioc)
+
+        assert payload.payload_type == "guardduty_finding"
+        assert payload.severity == "HIGH"
+        assert payload.raw_payload["Type"] == "CryptoCurrency:EC2/BitcoinTool.B"
+        assert payload.raw_payload["Severity"] == 7.0
+
+    @given(ioc=mule_bank_account_iocs())
+    @settings(max_examples=200)
+    def test_mule_bank_account_routes_to_guardduty_critical(
+        self, ioc: MuleBankAccountIoC
+    ) -> None:
+        """MuleBankAccountIoC generates GuardDuty finding with CRITICAL severity."""
+        from components.notification_module import NotificationModule
+
+        module = NotificationModule()
+        payload = module.generate_notification(ioc)
+
+        assert payload.payload_type == "guardduty_finding"
+        assert payload.severity == "CRITICAL"
+        assert (
+            payload.raw_payload["Type"]
+            == "UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration"
+        )
+        assert payload.raw_payload["Severity"] == 9.0
+
+    @given(ioc=phone_number_iocs())
+    @settings(max_examples=200)
+    def test_phone_number_routes_to_guardduty_medium(
+        self, ioc: PhoneNumberIoC
+    ) -> None:
+        """PhoneNumberIoC generates GuardDuty finding with MEDIUM severity."""
+        from components.notification_module import NotificationModule
+
+        module = NotificationModule()
+        payload = module.generate_notification(ioc)
+
+        assert payload.payload_type == "guardduty_finding"
+        assert payload.severity == "MEDIUM"
+        assert (
+            payload.raw_payload["Type"] == "Recon:EC2/PortProbeUnprotectedPort"
+        )
+        assert payload.raw_payload["Severity"] == 5.0
