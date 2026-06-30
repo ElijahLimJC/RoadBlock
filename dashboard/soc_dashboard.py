@@ -220,6 +220,85 @@ class SOCDashboard:
         with col8:
             st.metric("🏦 Mule Accts", mule_count)
 
+    def render_email_ingestion_panel(self, chat_state: dict[str, Any]) -> None:
+        """Render email ingestion status: connection, counts, and degraded warning.
+
+        Displays connection status with color indicator, email processing
+        metrics (fetched, scam, not-scam, outbound sent), and a degraded
+        ingestion warning when consecutive IMAP failures exceed threshold.
+        """
+        import streamlit as st
+
+        st.subheader("📧 Email Ingestion Status")
+
+        ingestion = chat_state.get("email_ingestion", {})
+
+        # Connection status with color indicator
+        connection_status = ingestion.get("connection_status", "disconnected")
+        if connection_status == "connected":
+            st.markdown("**Status:** :green[● Connected]")
+        else:
+            st.markdown("**Status:** :red[● Disconnected]")
+
+        # Degraded ingestion warning
+        if ingestion.get("degraded_warning", False):
+            st.warning(
+                "⚠️ Degraded email ingestion: multiple consecutive IMAP "
+                "connection failures detected."
+            )
+
+        # Metrics in columns
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Fetched", ingestion.get("total_fetched", 0))
+        with col2:
+            st.metric("Scam", ingestion.get("total_scam", 0))
+        with col3:
+            st.metric("Not Scam", ingestion.get("total_not_scam", 0))
+        with col4:
+            st.metric("Outbound Sent", ingestion.get("outbound_sent", 0))
+
+    def render_classification_log(
+        self, classifications: list[dict[str, Any] | Any]
+    ) -> None:
+        """Display recent classification decisions in reverse chronological order.
+
+        Shows the last 50 entries with sender, subject (truncated to 60 chars),
+        verdict, confidence, and determining stage. Handles empty list gracefully.
+        """
+        import streamlit as st
+
+        st.subheader("📋 Classification Log")
+
+        if not classifications:
+            st.info("No classification decisions recorded yet.")
+            return
+
+        # Take last 50 in reverse chronological order (newest first)
+        recent = list(reversed(classifications[-50:]))
+
+        # Build table data
+        rows: list[dict[str, Any]] = []
+        for entry in recent:
+            sender = _get_field(entry, "sender", "")
+            subject = _get_field(entry, "subject", "")
+            # Truncate subject to 60 characters
+            if len(subject) > 60:
+                subject = subject[:57] + "..."
+            verdict = _get_field(entry, "verdict", "")
+            confidence = _get_field(entry, "confidence", 0.0)
+            stage = _get_field(entry, "determining_stage", "")
+
+            rows.append({
+                "Sender": sender,
+                "Subject": subject,
+                "Verdict": verdict,
+                "Confidence": f"{confidence:.2f}",
+                "Stage": stage,
+            })
+
+        st.dataframe(rows, use_container_width=True)
+
     def render_notification_log(
         self, notifications: list[dict[str, Any] | Any]
     ) -> None:
