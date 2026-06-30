@@ -7,6 +7,7 @@ Chat State → Threat Parser → MCP Lookup → Notifications → Dashboard.
 
 import asyncio
 import logging
+import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -14,13 +15,18 @@ from typing import Optional
 
 import streamlit as st
 
+from components.email_ingestion import EmailIngestionModule
+from components.imap_client import IMAPClient
 from components.ioc_lookup_mcp import IoCLookupMCPClient
 from components.notification_module import NotificationModule
 from components.persona_engine import PersonaEngine
 from components.safety_filter import SafetyFilter
+from components.scam_classifier import ScamClassifier
+from components.smtp_client import SMTPClient
 from components.stalling_tracker import StallingTracker
 from components.threat_parser import ThreatParser
 from models.chat_models import ChatMessage, SessionMetrics
+from models.email_models import ScamPattern
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +107,124 @@ def trim_classification_log(state_dict: dict) -> None:
     log = state_dict.get("classification_log", [])
     if len(log) > _CLASSIFICATION_LOG_MAX:
         state_dict["classification_log"] = log[-_CLASSIFICATION_LOG_MAX:]
+
+
+def _get_default_scam_patterns() -> list[ScamPattern]:
+    """Return a default list of common scam indicator patterns.
+
+    These patterns cover urgency, financial lures, impersonation, and
+    phishing indicators commonly seen in scam emails.
+
+    Returns:
+        List of ScamPattern instances with regex and weight.
+    """
+    return [
+        ScamPattern(
+            name="urgency_keywords",
+            regex=r"(?i)\b(urgent|immediately|act now|limited time|expire)\b",
+            category="urgency",
+            weight=0.2,
+        ),
+        ScamPattern(
+            name="financial_lure",
+            regex=r"(?i)\b(lottery|winner|prize|inheritance|million|transfer)\b",
+            category="financial_lure",
+            weight=0.25,
+        ),
+        ScamPattern(
+            name="authority_impersonation",
+            regex=r"(?i)\b(bank|irs|fbi|government|official|attorney)\b",
+            category="impersonation",
+            weight=0.15,
+        ),
+        ScamPattern(
+            name="payment_request",
+            regex=r"(?i)\b(wire transfer|bitcoin|gift card|western union|crypto)\b",
+            category="financial_lure",
+            weight=0.3,
+        ),
+        ScamPattern(
+            name="phishing_link",
+            regex=r"(?i)(click here|verify your account|confirm your identity|login)",
+            category="phishing",
+            weight=0.2,
+        ),
+        ScamPattern(
+            name="threat_language",
+            regex=r"(?i)\b(suspended|locked|seized|arrested|legal action)\b",
+            category="urgency",
+            weight=0.2,
+        ),
+    ]
+
+
+def initialize_email_ingestion() -> "EmailIngestionModule | None":
+    """Initialize the email ingestion module from environment variables.
+
+    Creates IMAPClient, SMTPClient, ScamClassifier, and EmailIngestionModule
+    instances. Stores the module in st.session_state.email_ingestion_module
+    and starts the polling loop.
+
+    If any required IMAP/SMTP environment variables are missing, logs at
+    info level and returns None (email ingestion is optional).
+
+    Returns:
+        The initialized EmailIngestionModule, or None if env vars are missing.
+    """
+    if st.session_state.get("email_ingestion_module") is not None:
+        module: EmailIngestionModule = st.session_state.email_ingestion_module
+        return module
+
+    required_vars = ["IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME", "IMAP_PASSWORD"]
+    missing = [v for v in required_vars if not os.environ.get(v)]
+    if missing:
+        logger.info(
+            "Email ingestion disabled: missing env vars %s", ", ".join(missing)
+        )
+        return None
+
+    imap_client = IMAPClient(
+        host=os.environ["IMAP_HOST"],
+        port=int(os.environ.get("IMAP_PORT", "993")),
+        username=os.environ.get("IMAP_USERNAME", ""),
+        password=os.environ.get("IMAP_PASSWORD", ""),
+    )
+
+    smtp_host = os.environ.get("SMTP_HOST", "")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_username = os.environ.get("SMTP_USERNAME", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+    smtp_sender = os.environ.get("SMTP_SENDER", "")
+
+    if not smtp_host:
+        logger.info("SMTP not configured; outbound replies will be disabled")
+
+    smtp_client = SMTPClient(
+        host=smtp_host,
+        port=smtp_port,
+        username=smtp_username,
+        password=smtp_password,
+        sender_address=smtp_sender,
+    )
+
+    patterns = _get_default_scam_patterns()
+    scam_classifier = ScamClassifier(
+        patterns=patterns,
+        llm_client=None,
+        confidence_threshold=0.7,
+        fallback_threshold=0.3,
+    )
+
+    module = EmailIngestionModule(
+        imap_client=imap_client,
+        smtp_client=smtp_client,
+        scam_classifier=scam_classifier,
+        polling_interval=30,
+    )
+
+    st.session_state.email_ingestion_module = module
+    module.start_polling()
+    return module
 
 
 def _get_default_blocked_response() -> str:
@@ -396,11 +520,7 @@ def _store_ioc(ioc) -> None:
         ioc: A BaseIoC subclass instance to store.
     """
     from models.ioc_models import (
-        CryptoWalletIoC,
         IoCCategory,
-        MuleBankAccountIoC,
-        PhishingDomainIoC,
-        PhoneNumberIoC,
     )
 
     iocs = st.session_state.get("iocs", {})
@@ -426,6 +546,16 @@ st.set_page_config(page_title="RoadBlock", layout="wide")
 
 # Initialize session state defaults
 initialize_chat_state()
+
+# Initialize email ingestion (optional, depends on env vars)
+if "email_ingestion_module" not in st.session_state:
+    st.session_state.email_ingestion_module = initialize_email_ingestion()
+
+# Flush email ingestion results into session state each render cycle
+if st.session_state.get("email_ingestion_module") is not None:
+    _email_module = st.session_state.email_ingestion_module
+    _email_module.flush_to_session_state(st.session_state.email_ingestion)
+    _email_module._smtp_client.process_retry_queue()
 
 # --- Import SOC Dashboard ---
 from dashboard.soc_dashboard import SOCDashboard
@@ -480,13 +610,53 @@ with input_col:
             try:
                 persona = PersonaEngine()
             except Exception:
-                # No API key or init failure — persona will be None, fallback used
+                # No API key or init failure - persona will be None, fallback used
                 pass
 
             process_scammer_message(
                 raw_message=raw_message.strip(),
                 persona_engine=persona,
             )
+
+            # Wire SMTP delivery for email-sourced messages
+            if st.session_state.get("email_ingestion_module") is not None:
+                _module = st.session_state.email_ingestion_module
+                outbound_queue = st.session_state.email_ingestion.get(
+                    "outbound_queue", []
+                )
+                sent_count = 0
+                remaining_queue: list = []
+                for outbound in outbound_queue:
+                    to_addr = outbound.get("to_address", "") if isinstance(
+                        outbound, dict
+                    ) else getattr(outbound, "to_address", "")
+                    subject = outbound.get("subject", "") if isinstance(
+                        outbound, dict
+                    ) else getattr(outbound, "subject", "")
+                    body = outbound.get("body", "") if isinstance(
+                        outbound, dict
+                    ) else getattr(outbound, "body", "")
+                    in_reply_to = outbound.get("in_reply_to", "") if isinstance(
+                        outbound, dict
+                    ) else getattr(outbound, "in_reply_to", "")
+
+                    success = _module._smtp_client.send_reply(
+                        to_address=to_addr,
+                        subject=subject,
+                        body=body,
+                        in_reply_to=in_reply_to or None,
+                    )
+                    if success:
+                        sent_count += 1
+                    else:
+                        remaining_queue.append(outbound)
+
+                st.session_state.email_ingestion["outbound_queue"] = remaining_queue
+                if sent_count > 0:
+                    st.session_state.email_ingestion["outbound_sent"] = (
+                        st.session_state.email_ingestion.get("outbound_sent", 0)
+                        + sent_count
+                    )
 
         # Rerun to refresh dashboard with new IoCs and conversation
         st.rerun()
@@ -502,3 +672,11 @@ with input_col:
 with dashboard_col:
     # Render SOC Dashboard with current session state
     _dashboard.render(dict(st.session_state))
+
+    # Render email ingestion panel if module is active
+    if st.session_state.get("email_ingestion_module") is not None:
+        st.divider()
+        _dashboard.render_email_ingestion_panel(dict(st.session_state))
+        _dashboard.render_classification_log(
+            st.session_state.email_ingestion.get("classification_log", [])
+        )

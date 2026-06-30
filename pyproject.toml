@@ -15,6 +15,9 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
 
+[tool.ruff.lint.per-file-ignores]
+"app.py" = ["E402"]  # Streamlit requires st.set_page_config before other imports
+
 [tool.ruff.lint.isort]
 known-first-party = ["components", "models", "dashboard"]
 
