@@ -56,6 +56,8 @@ class IMAPClient:
         self.password = password or os.environ.get("IMAP_PASSWORD", "")
         self.timeout = timeout
         self._connection: imaplib.IMAP4_SSL | None = None
+        self._baseline_uid: int = 0
+        self._baseline_set: bool = False
 
     def connect(self) -> None:
         """Establish SSL/TLS connection and authenticate.
@@ -80,13 +82,14 @@ class IMAPClient:
             self._connection = None
 
     def fetch_unread(self) -> list[tuple[str, bytes]]:
-        """Fetch all unread email bytes from inbox with their UIDs.
+        """Fetch new unread email bytes from inbox with their UIDs.
 
-        Selects the INBOX folder, searches for UNSEEN messages, and fetches
-        the full RFC822 content of each. Returns an empty list on any failure.
+        On first call, records the current highest UID as a baseline and
+        returns nothing (skips pre-existing emails). Subsequent calls only
+        return emails with UIDs above the baseline that are UNSEEN.
 
         Returns:
-            List of (uid, raw_bytes) tuples for each unread message. Empty
+            List of (uid, raw_bytes) tuples for new unread messages. Empty
             list if not connected or on any fetch error.
         """
         if not self.is_connected:
@@ -96,7 +99,24 @@ class IMAPClient:
         try:
             assert self._connection is not None
             self._connection.select("INBOX")
-            status, data = self._connection.uid("search", None, "UNSEEN")
+
+            # On first poll, establish baseline UID (skip all existing emails)
+            if not self._baseline_set:
+                status, data = self._connection.uid("search", None, "ALL")
+                if status == "OK" and data and data[0]:
+                    all_uids = data[0].split()
+                    if all_uids:
+                        self._baseline_uid = int(all_uids[-1])
+                self._baseline_set = True
+                logger.info(
+                    "IMAP baseline set at UID %d (skipping existing emails)",
+                    self._baseline_uid,
+                )
+                return []
+
+            # Search for UNSEEN messages with UID greater than baseline
+            search_criteria = f"UNSEEN UID {self._baseline_uid + 1}:*"
+            status, data = self._connection.uid("search", None, search_criteria)
             if status != "OK" or not data or not data[0]:
                 return []
 
@@ -104,14 +124,20 @@ class IMAPClient:
             messages: list[tuple[str, bytes]] = []
 
             for uid in uids:
+                uid_int = int(uid)
+                if uid_int <= self._baseline_uid:
+                    continue
+
                 try:
                     status, msg_data = self._connection.uid(
                         "fetch", uid, "(RFC822)"
                     )
                     if status == "OK" and msg_data and msg_data[0] is not None:
-                        # msg_data[0] is a tuple (envelope, message_bytes)
                         if isinstance(msg_data[0], tuple) and len(msg_data[0]) >= 2:
                             messages.append((uid.decode(), msg_data[0][1]))
+                            # Update baseline to this UID
+                            if uid_int > self._baseline_uid:
+                                self._baseline_uid = uid_int
                 except Exception as e:
                     logger.warning("Failed to fetch UID %s: %s", uid, e)
                     continue
