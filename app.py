@@ -620,13 +620,21 @@ with input_col:
 
     if submitted and raw_message.strip():
         with st.spinner("Processing message through pipeline..."):
-            # Attempt to create a PersonaEngine if API key is available
+            # Attempt to create a PersonaEngine with Gemini LLM client
             persona = None
-            try:
-                persona = PersonaEngine()
-            except Exception:
-                # No API key or init failure - persona will be None, fallback used
-                pass
+            gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
+            if gemini_key:
+                try:
+                    import google.generativeai as genai
+
+                    genai.configure(api_key=gemini_key)
+                    llm_client = genai.GenerativeModel("gemini-1.5-flash")
+                    persona = PersonaEngine(llm_client=llm_client)
+                except Exception as e:
+                    logger.warning("Failed to init PersonaEngine with Gemini: %s", e)
+            if persona is None:
+                # Fallback-only mode (no LLM)
+                persona = PersonaEngine(llm_client=None)
 
             process_scammer_message(
                 raw_message=raw_message.strip(),
