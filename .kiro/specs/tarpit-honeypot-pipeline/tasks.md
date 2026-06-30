@@ -242,17 +242,17 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Handle parser errors gracefully: show last good state, display error banner
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6, 10.5_
 
-- [ ] 11. Checkpoint - Ensure all tests pass
+- [x] 11. Checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 12. Wire pipeline and implement Streamlit app entry point
-  - [ ] 12.1 Implement session state initialization in `app.py`
+- [x] 12. Wire pipeline and implement Streamlit app entry point
+  - [x] 12.1 Implement session state initialization in `app.py`
     - Implement `initialize_chat_state()` setting all Chat_State keys to empty defaults per design spec
     - Keys: conversation_history, iocs (dict with 4 category lists), metrics, notifications, rejection_log, parser_status, last_error, mcp_lookup_cache, mcp_server_status, known_ioc_count, new_ioc_count
     - Preserve existing values on Streamlit rerun (only set if key not in session_state)
     - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
 
-  - [ ] 12.2 Implement pipeline orchestration in `app.py`
+  - [x] 12.2 Implement pipeline orchestration in `app.py`
     - Wire sequential pipeline: Scammer Input → Safety_Filter.scan() → branch (blocked vs safe)
     - If blocked (≥80% injection): generate default response, skip Persona_Engine, still invoke Threat_Parser
     - If safe/partial: forward sanitized message to Persona_Engine.generate_response()
@@ -264,7 +264,7 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Enforce 15s end-to-end timeout (excluding async parser)
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6, 8.7_
 
-  - [ ] 12.3 Implement Streamlit UI layout in `app.py`
+  - [x] 12.3 Implement Streamlit UI layout in `app.py`
     - Set up Streamlit page config and layout
     - Add scammer message input (text_input or text_area + submit button)
     - Integrate SOCDashboard rendering on each cycle
@@ -273,12 +273,12 @@ This plan breaks down the RoadBlock automated social honeypot pipeline into incr
     - Wire `st.rerun()` for real-time IoC appearance after async extraction
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
 
-  - [ ] 12.4 Write property test for pipeline error resilience in `tests/test_threat_parser.py`
+  - [x] 12.4 Write property test for pipeline error resilience in `tests/test_threat_parser.py`
     - **Property 17: Pipeline Error Resilience**
     - **Validates: Requirements 8.5**
     - Generate random Chat_State; inject exceptions at each pipeline stage; assert pre-existing data unchanged
 
-- [ ] 13. Final checkpoint - Ensure all tests pass
+- [x] 13. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes

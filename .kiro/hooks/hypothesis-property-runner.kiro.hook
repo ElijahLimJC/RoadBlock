@@ -8,7 +8,7 @@
   },
   "then": {
     "type": "runCommand",
-    "command": "pytest tests/ --hypothesis-show-statistics -x -q 2>&1 | tail -50",
+    "command": "conda run -n roadblock pytest tests/ --hypothesis-show-statistics -x -q 2>&1 | tail -50",
     "timeout": 120
   }
 }

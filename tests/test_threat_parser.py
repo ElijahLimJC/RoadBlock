@@ -524,6 +524,209 @@ class TestPhoneFalsePositivePrevention:
         )
 
 
+class TestPipelineErrorResilience:
+    """Property 17: Pipeline Error Resilience.
+
+    **Validates: Requirements 8.5**
+
+    For any existing Chat_State and any pipeline stage that raises an
+    unhandled exception, all pre-existing Chat_State data SHALL remain
+    unchanged after error handling completes.
+    """
+
+    @given(
+        turn_count=st.integers(min_value=0, max_value=100),
+        num_messages=st.integers(min_value=0, max_value=5),
+        num_notifications=st.integers(min_value=0, max_value=5),
+        num_wallets=st.integers(min_value=0, max_value=3),
+        num_domains=st.integers(min_value=0, max_value=3),
+        known_ioc_count=st.integers(min_value=0, max_value=50),
+        new_ioc_count=st.integers(min_value=0, max_value=50),
+        failing_stage=st.sampled_from([
+            "safety_filter",
+            "persona_engine",
+            "stalling_tracker",
+            "threat_parser",
+        ]),
+    )
+    @settings(max_examples=200)
+    def test_preexisting_state_preserved_on_stage_failure(
+        self,
+        turn_count: int,
+        num_messages: int,
+        num_notifications: int,
+        num_wallets: int,
+        num_domains: int,
+        known_ioc_count: int,
+        new_ioc_count: int,
+        failing_stage: str,
+    ) -> None:
+        """Pre-existing Chat_State data is unchanged when a pipeline stage raises.
+
+        **Validates: Requirements 8.5**
+        """
+        from unittest.mock import MagicMock, patch as mock_patch
+        from datetime import datetime, timedelta
+        from copy import deepcopy
+
+        from app import process_scammer_message
+        from components.safety_filter import SafetyFilter
+        from components.persona_engine import PersonaEngine
+        from components.stalling_tracker import StallingTracker
+        from components.threat_parser import ThreatParser
+        from models.chat_models import ChatMessage, SessionMetrics
+
+        # --- Build pre-existing state ---
+        pre_messages = [
+            ChatMessage(
+                sender="scammer" if i % 2 == 0 else "persona",
+                content=f"pre-existing message {i}",
+                timestamp=datetime(2024, 1, 1, 12, 0, i),
+            )
+            for i in range(num_messages)
+        ]
+        pre_notifications = [
+            {"type": f"notification_{i}", "severity": "HIGH"}
+            for i in range(num_notifications)
+        ]
+        pre_iocs = {
+            "cryptocurrency_wallets": [f"wallet_{i}" for i in range(num_wallets)],
+            "phishing_domains": [f"domain_{i}" for i in range(num_domains)],
+            "phone_numbers": [],
+            "mule_bank_accounts": [],
+        }
+        pre_metrics = SessionMetrics(turn_count=turn_count).model_dump()
+
+        # Build mock session_state as a dict
+        mock_state = {
+            "conversation_history": list(pre_messages),
+            "iocs": deepcopy(pre_iocs),
+            "metrics": deepcopy(pre_metrics),
+            "notifications": list(pre_notifications),
+            "rejection_log": [],
+            "parser_status": "idle",
+            "last_error": None,
+            "mcp_lookup_cache": {},
+            "mcp_server_status": "unknown",
+            "known_ioc_count": known_ioc_count,
+            "new_ioc_count": new_ioc_count,
+        }
+
+        # Snapshot of pre-existing data that MUST survive the error
+        snapshot_messages = list(pre_messages)
+        snapshot_iocs = deepcopy(pre_iocs)
+        snapshot_metrics = deepcopy(pre_metrics)
+        snapshot_notifications = list(pre_notifications)
+        snapshot_known = known_ioc_count
+        snapshot_new = new_ioc_count
+
+        # --- Create failing components ---
+        class FailingError(RuntimeError):
+            pass
+
+        mock_safety = MagicMock(spec=SafetyFilter)
+        mock_persona = MagicMock(spec=PersonaEngine)
+        mock_stalling = MagicMock(spec=StallingTracker)
+        mock_parser = MagicMock(spec=ThreatParser)
+
+        # Configure mocks to work normally by default
+        from models.chat_models import ScanResult, PersonaResponse
+
+        mock_safety.scan.return_value = ScanResult(
+            sanitized_content="test message",
+            detected_patterns=[],
+            is_blocked=False,
+        )
+        mock_persona.generate_response.return_value = PersonaResponse(
+            content="Oh dear I am confused let me think about that for a moment",
+            is_fallback=True,
+        )
+        mock_stalling.record_turn.return_value = None
+        # For threat_parser, the extraction is run via thread pool and asyncio
+        # Make it return an empty result to avoid complexity
+        import asyncio
+
+        async def empty_extract(msg):
+            from models.chat_models import ExtractionResult
+            return ExtractionResult(iocs=[], rejections=[])
+
+        async def failing_extract(msg):
+            raise FailingError("Threat parser exploded")
+
+        mock_parser.extract_iocs = MagicMock(side_effect=lambda msg: empty_extract(msg))
+
+        # Inject the failure at the specified stage
+        if failing_stage == "safety_filter":
+            mock_safety.scan.side_effect = FailingError("Safety filter exploded")
+        elif failing_stage == "persona_engine":
+            mock_persona.generate_response.side_effect = FailingError(
+                "Persona engine exploded"
+            )
+        elif failing_stage == "stalling_tracker":
+            mock_stalling.record_turn.side_effect = FailingError(
+                "Stalling tracker exploded"
+            )
+        elif failing_stage == "threat_parser":
+            # Return an async coroutine that raises, so run_until_complete
+            # correctly handles it inside the event loop
+            mock_parser.extract_iocs = MagicMock(
+                side_effect=lambda msg: failing_extract(msg)
+            )
+
+        # --- Patch st.session_state and run pipeline ---
+        with mock_patch("app.st.session_state", mock_state):
+            with mock_patch("streamlit.session_state", mock_state):
+                # Should NOT raise — the pipeline handles errors internally
+                process_scammer_message(
+                    raw_message="hello scammer message",
+                    safety_filter=mock_safety,
+                    persona_engine=mock_persona,
+                    stalling_tracker=mock_stalling,
+                    threat_parser=mock_parser,
+                    mcp_client=None,
+                    notification_module=None,
+                )
+
+        # --- Assert pre-existing data is preserved ---
+        # Conversation history: pre-existing messages must still be present
+        # (the pipeline may ADD new messages, but must not remove/corrupt old ones)
+        current_history = mock_state["conversation_history"]
+        for i, original_msg in enumerate(snapshot_messages):
+            assert i < len(current_history), (
+                f"Pre-existing message at index {i} was lost"
+            )
+            assert current_history[i] == original_msg, (
+                f"Pre-existing message at index {i} was corrupted"
+            )
+
+        # IoCs: pre-existing IoC data must be preserved
+        for category in ["cryptocurrency_wallets", "phishing_domains",
+                         "phone_numbers", "mule_bank_accounts"]:
+            current_list = mock_state["iocs"][category]
+            original_list = snapshot_iocs[category]
+            assert current_list[:len(original_list)] == original_list, (
+                f"Pre-existing IoCs in '{category}' were corrupted or lost"
+            )
+
+        # Notifications: pre-existing notifications must still be present
+        current_notifs = mock_state["notifications"]
+        for i, original_notif in enumerate(snapshot_notifications):
+            assert i < len(current_notifs), (
+                f"Pre-existing notification at index {i} was lost"
+            )
+            assert current_notifs[i] == original_notif, (
+                f"Pre-existing notification at index {i} was corrupted"
+            )
+
+        # known_ioc_count and new_ioc_count: should not decrease
+        assert mock_state["known_ioc_count"] >= snapshot_known, (
+            "known_ioc_count decreased after pipeline error"
+        )
+        assert mock_state["new_ioc_count"] >= snapshot_new, (
+            "new_ioc_count decreased after pipeline error"
+        )
+
+
 class TestMuleAccountProximityExtraction:
     """Property 13: Mule Account Proximity Extraction.
 
