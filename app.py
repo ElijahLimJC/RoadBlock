@@ -11,7 +11,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -180,7 +180,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         return module
 
     required_vars = ["IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME", "IMAP_PASSWORD"]
-    missing = [v for v in required_vars if not os.environ.get(v)]
+    missing = [v for v in required_vars if not os.environ.get(v, "").strip()]
     if missing:
         logger.info(
             "Email ingestion disabled: missing env vars %s", ", ".join(missing)
@@ -188,17 +188,17 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         return None
 
     imap_client = IMAPClient(
-        host=os.environ["IMAP_HOST"],
-        port=int(os.environ.get("IMAP_PORT", "993")),
-        username=os.environ.get("IMAP_USERNAME", ""),
-        password=os.environ.get("IMAP_PASSWORD", ""),
+        host=os.environ["IMAP_HOST"].strip(),
+        port=int(os.environ.get("IMAP_PORT", "993").strip()),
+        username=os.environ.get("IMAP_USERNAME", "").strip(),
+        password=os.environ.get("IMAP_PASSWORD", "").strip(),
     )
 
-    smtp_host = os.environ.get("SMTP_HOST", "")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_username = os.environ.get("SMTP_USERNAME", "")
-    smtp_password = os.environ.get("SMTP_PASSWORD", "")
-    smtp_sender = os.environ.get("SMTP_SENDER", "")
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587").strip())
+    smtp_username = os.environ.get("SMTP_USERNAME", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    smtp_sender = os.environ.get("SMTP_SENDER", "").strip()
 
     if not smtp_host:
         logger.info("SMTP not configured; outbound replies will be disabled")
@@ -408,15 +408,17 @@ def process_scammer_message(
 
     try:
         st.session_state["parser_status"] = "running"
+        # Capture session state reference for the background thread
+        # (background threads can't access st.session_state directly)
+        session_state_ref = st.session_state
         # Submit extraction to thread pool (non-blocking for Streamlit)
-        # Do NOT block the main thread waiting for result — let it complete
-        # asynchronously. The extraction function updates session_state directly.
         _extraction_executor.submit(
             _run_extraction_pipeline,
             message_for_extraction,
             threat_parser,
             mcp_client,
             notification_module,
+            session_state_ref,
         )
     except Exception as e:
         error = PipelineError("Threat_Parser", f"Extraction dispatch failed: {e}", e)
@@ -430,6 +432,7 @@ def _run_extraction_pipeline(
     threat_parser: ThreatParser,
     mcp_client: Optional[IoCLookupMCPClient],
     notification_module: NotificationModule,
+    state: Any = None,
 ) -> None:
     """Run the extraction pipeline in a background thread.
 
@@ -444,7 +447,16 @@ def _run_extraction_pipeline(
         threat_parser: ThreatParser instance.
         mcp_client: Optional MCP client for IoC lookups.
         notification_module: NotificationModule for generating alerts.
+        state: Session state reference passed from main thread.
     """
+    # Use passed state reference (background thread can't access st.session_state)
+    if state is None:
+        try:
+            state = st.session_state
+        except Exception:
+            logger.warning("No session state available in background thread")
+            return
+
     try:
         # Run async extraction in a new event loop (since we're in a thread)
         loop = asyncio.new_event_loop()
@@ -458,14 +470,14 @@ def _run_extraction_pipeline(
 
         # Update rejection log
         if extraction_result.rejections:
-            st.session_state["rejection_log"].extend(extraction_result.rejections)
+            state["rejection_log"].extend(extraction_result.rejections)
 
         if not extraction_result.iocs:
-            st.session_state["parser_status"] = "idle"
+            state["parser_status"] = "idle"
             return
 
         # --- MCP Lookup for each IoC ---
-        cache = st.session_state.get("mcp_lookup_cache", {})
+        cache = state.get("mcp_lookup_cache", {})
         lookup_results = []
 
         if mcp_client is not None:
@@ -478,11 +490,11 @@ def _run_extraction_pipeline(
                     )
                 finally:
                     loop.close()
-                st.session_state["mcp_lookup_cache"] = cache
-                st.session_state["mcp_server_status"] = "connected"
+                state["mcp_lookup_cache"] = cache
+                state["mcp_server_status"] = "connected"
             except Exception as e:
                 logger.warning("MCP batch lookup failed: %s", e)
-                st.session_state["mcp_server_status"] = "disconnected"
+                state["mcp_server_status"] = "disconnected"
                 # Continue without lookup results — IoCs still stored
 
         # --- Store IoCs and generate notifications for NEW ones ---
@@ -492,27 +504,27 @@ def _run_extraction_pipeline(
             if i < len(lookup_results):
                 is_known = lookup_results[i].is_known
                 if is_known:
-                    st.session_state["known_ioc_count"] = (
-                        st.session_state.get("known_ioc_count", 0) + 1
+                    state["known_ioc_count"] = (
+                        state.get("known_ioc_count", 0) + 1
                     )
                 else:
-                    st.session_state["new_ioc_count"] = (
-                        st.session_state.get("new_ioc_count", 0) + 1
+                    state["new_ioc_count"] = (
+                        state.get("new_ioc_count", 0) + 1
                     )
             else:
                 # No lookup result — treat as new
-                st.session_state["new_ioc_count"] = (
-                    st.session_state.get("new_ioc_count", 0) + 1
+                state["new_ioc_count"] = (
+                    state.get("new_ioc_count", 0) + 1
                 )
 
             # Store IoC in appropriate category list
-            _store_ioc(ioc)
+            _store_ioc(ioc, state)
 
             # Generate notification only for NEW IoCs (not previously known)
             if not is_known:
                 try:
                     notification = notification_module.generate_notification(ioc)
-                    st.session_state["notifications"].append(notification)
+                    state["notifications"].append(notification)
                 except Exception as e:
                     logger.warning(
                         "Notification generation failed for IoC %s: %s",
@@ -520,25 +532,29 @@ def _run_extraction_pipeline(
                         e,
                     )
 
-        st.session_state["parser_status"] = "idle"
+        state["parser_status"] = "idle"
 
     except Exception as e:
         logger.error("Extraction pipeline failed: %s", e, exc_info=True)
-        st.session_state["parser_status"] = "error"
-        st.session_state["last_error"] = f"Extraction error: {e}"
+        state["parser_status"] = "error"
+        state["last_error"] = f"Extraction error: {e}"
 
 
-def _store_ioc(ioc) -> None:
+def _store_ioc(ioc, state=None) -> None:
     """Store an extracted IoC in the appropriate session state category list.
 
     Args:
         ioc: A BaseIoC subclass instance to store.
+        state: Session state reference (uses st.session_state if None).
     """
     from models.ioc_models import (
         IoCCategory,
     )
 
-    iocs = st.session_state.get("iocs", {})
+    if state is None:
+        state = st.session_state
+
+    iocs = state.get("iocs", {})
 
     if ioc.category == IoCCategory.CRYPTOCURRENCY_WALLET:
         iocs.setdefault("cryptocurrency_wallets", []).append(ioc)
@@ -549,7 +565,7 @@ def _store_ioc(ioc) -> None:
     elif ioc.category == IoCCategory.MULE_BANK_ACCOUNT:
         iocs.setdefault("mule_bank_accounts", []).append(ioc)
 
-    st.session_state["iocs"] = iocs
+    state["iocs"] = iocs
 
 
 # ---------------------------------------------------------------------------
