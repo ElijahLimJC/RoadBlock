@@ -998,8 +998,27 @@ class ThreatParser:
                 for m in self._bank_name_pattern.finditer(text)
             ]
 
+            # Fallback: if no recognized bank name, look for contextual
+            # keywords like "bank", "routing", "account" near digit sequences
             if not bank_matches:
-                return iocs, rejections
+                # Check for generic bank-related keywords
+                generic_bank_pattern = re.compile(
+                    r"\b(bank|routing\s*(?:number|no|#)?|account\s*(?:number|no|#)?|"
+                    r"receiving\s*bank|wire\s*transfer)\b",
+                    re.IGNORECASE,
+                )
+                generic_matches = [
+                    (m.group(), m.start(), m.end())
+                    for m in generic_bank_pattern.finditer(text)
+                ]
+                if generic_matches:
+                    # Use the first keyword match as a pseudo "bank name"
+                    # to anchor the proximity search
+                    bank_matches = [
+                        ("Unknown Bank", generic_matches[0][1], generic_matches[0][2])
+                    ]
+                else:
+                    return iocs, rejections
 
             # Find all digit sequences in the text
             digit_matches = [
