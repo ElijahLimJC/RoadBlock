@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Commit on File Create",
+  "description": "Automatically stages and commits newly created files with a conventional commit message.",
+  "version": "1",
+  "when": {
+    "type": "fileCreated",
+    "patterns": [
+      "*"
+    ]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "git add -A && git commit -m \"chore: add new file\""
+  }
+}
