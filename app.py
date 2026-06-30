@@ -69,6 +69,39 @@ def initialize_chat_state() -> None:
         if key not in st.session_state:
             st.session_state[key] = default
 
+    # Email ingestion state (Task 9.1)
+    if "email_ingestion" not in st.session_state:
+        st.session_state.email_ingestion = {
+            "connection_status": "disconnected",
+            "total_fetched": 0,
+            "total_scam": 0,
+            "total_not_scam": 0,
+            "outbound_sent": 0,
+            "consecutive_failures": 0,
+            "degraded_warning": False,
+            "classification_log": [],  # max 200 ClassificationResult entries
+            "outbound_queue": [],      # max 100 OutboundEmail entries
+            "threads": {},             # sender_address -> EmailThreadMetadata
+        }
+
+
+# Max capacity for email ingestion classification log
+_CLASSIFICATION_LOG_MAX = 200
+
+
+def trim_classification_log(state_dict: dict) -> None:
+    """Evict oldest entries when classification_log exceeds max capacity.
+
+    Trims the classification_log list in-place to keep at most
+    _CLASSIFICATION_LOG_MAX entries, removing the oldest first.
+
+    Args:
+        state_dict: The email_ingestion state dictionary (mutable).
+    """
+    log = state_dict.get("classification_log", [])
+    if len(log) > _CLASSIFICATION_LOG_MAX:
+        state_dict["classification_log"] = log[-_CLASSIFICATION_LOG_MAX:]
+
 
 def _get_default_blocked_response() -> str:
     """Generate a default confused-elder response for blocked messages.

@@ -7,15 +7,20 @@ engagement pipeline. Runs as a background daemon thread within the monolithic
 Streamlit process.
 """
 
+import asyncio
 import email
 import logging
 import re
 import threading
 import time
 from email.utils import parseaddr
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from models.email_models import EmailMessage
+from models.email_models import (
+    ClassificationResult,
+    EmailMessage,
+    OutboundEmail,
+)
 
 if TYPE_CHECKING:
     from components.imap_client import IMAPClient
@@ -31,14 +36,32 @@ _MAX_POLLING_INTERVAL = 300
 # Consecutive failure threshold for degraded warning
 _DEGRADED_FAILURE_THRESHOLD = 3
 
+# Capacity limits for pending results
+_MAX_CLASSIFICATION_LOG = 200
+_MAX_OUTBOUND_QUEUE = 100
+
+# Default confused-elder response for blocked messages
+_DEFAULT_BLOCKED_RESPONSE = (
+    "Oh dear, I'm sorry, I don't quite understand what you're saying. "
+    "Could you try saying that again in simpler words? My grandson Tommy "
+    "says I need to be more careful about what I read on the computer. "
+    "Anyway, what was it you needed help with?"
+)
+
 
 class EmailIngestionModule:
     """Background email ingestion with IMAP polling, parsing, and classification.
 
     Polls an IMAP mailbox at a configurable interval, parses raw MIME bytes
-    into EmailMessage models, classifies each via ScamClassifier, and logs
-    results. Tracks consecutive polling failures and sets a degraded warning
-    flag after 3 consecutive failures.
+    into EmailMessage models, classifies each via ScamClassifier, and routes
+    confirmed scams through the Safety Filter, Persona Engine, and Threat
+    Parser pipeline. Tracks consecutive polling failures and sets a degraded
+    warning flag after 3 consecutive failures.
+
+    Since this runs in a background thread that cannot directly access
+    st.session_state, pipeline results are buffered in _pending_results
+    and flushed to session state during the Streamlit render cycle via
+    flush_to_session_state().
 
     Attributes:
         polling_interval: Seconds between poll cycles (10-300).
@@ -81,6 +104,17 @@ class EmailIngestionModule:
         self._consecutive_failures = 0
         self.degraded = False
 
+        # Thread-safe pending results buffer (Task 8.2)
+        self._lock = threading.Lock()
+        self._pending_results: list[dict[str, Any]] = []
+
+        # Internal thread state for counters and threads (Task 8.3)
+        self._total_fetched = 0
+        self._total_scam = 0
+        self._total_not_scam = 0
+        self._outbound_sent = 0
+        self._threads: dict[str, dict[str, Any]] = {}
+
     def start_polling(self) -> None:
         """Launch background daemon thread running the poll loop.
 
@@ -116,6 +150,58 @@ class EmailIngestionModule:
         self._poll_thread = None
         self._imap_client.disconnect()
         logger.info("Email ingestion polling stopped")
+
+    def flush_to_session_state(self, state_dict: dict[str, Any]) -> None:
+        """Flush buffered pipeline results into the session state dict.
+
+        Called from the main Streamlit thread during the render cycle to
+        safely transfer background results into st.session_state.
+
+        Args:
+            state_dict: The email_ingestion sub-dict from st.session_state.
+        """
+        with self._lock:
+            pending = self._pending_results[:]
+            self._pending_results.clear()
+
+        for result in pending:
+            result_type = result.get("type")
+
+            if result_type == "classification":
+                log = state_dict.get("classification_log", [])
+                log.append(result["data"])
+                if len(log) > _MAX_CLASSIFICATION_LOG:
+                    state_dict["classification_log"] = log[-_MAX_CLASSIFICATION_LOG:]
+                else:
+                    state_dict["classification_log"] = log
+
+            elif result_type == "outbound":
+                queue = state_dict.get("outbound_queue", [])
+                if len(queue) < _MAX_OUTBOUND_QUEUE:
+                    queue.append(result["data"])
+                state_dict["outbound_queue"] = queue
+
+            elif result_type == "thread_update":
+                threads = state_dict.get("threads", {})
+                sender = result["sender"]
+                threads[sender] = result["data"]
+                state_dict["threads"] = threads
+
+            elif result_type == "counters":
+                state_dict["total_fetched"] = result.get(
+                    "total_fetched", state_dict.get("total_fetched", 0)
+                )
+                state_dict["total_scam"] = result.get(
+                    "total_scam", state_dict.get("total_scam", 0)
+                )
+                state_dict["total_not_scam"] = result.get(
+                    "total_not_scam", state_dict.get("total_not_scam", 0)
+                )
+                state_dict["outbound_sent"] = result.get(
+                    "outbound_sent", state_dict.get("outbound_sent", 0)
+                )
+                state_dict["consecutive_failures"] = self._consecutive_failures
+                state_dict["degraded_warning"] = self.degraded
 
     def _parse_email(self, raw_bytes: bytes) -> EmailMessage | None:
         """Parse raw MIME bytes into an EmailMessage model.
@@ -280,11 +366,13 @@ class EmailIngestionModule:
                 for raw_bytes in raw_emails:
                     email_msg = self._parse_email(raw_bytes)
                     if email_msg is not None:
+                        self._total_fetched += 1
                         self.process_email(email_msg)
 
                 # Success: reset failure counter and degraded flag
                 self._consecutive_failures = 0
                 self.degraded = False
+                self._enqueue_counter_update()
 
             except Exception as e:
                 self._consecutive_failures += 1
@@ -301,6 +389,8 @@ class EmailIngestionModule:
                         self._consecutive_failures,
                     )
 
+                self._enqueue_counter_update()
+
             # Sleep in small increments to allow responsive shutdown
             self._interruptible_sleep(self.polling_interval)
 
@@ -316,10 +406,11 @@ class EmailIngestionModule:
             time.sleep(1)
 
     def process_email(self, email_msg: EmailMessage) -> None:
-        """Process a parsed email through classification.
+        """Process a parsed email through classification and pipeline.
 
-        Placeholder for full pipeline integration (task 8.2). Currently
-        classifies the email and logs the result.
+        Classifies the email via ScamClassifier. Scam verdicts are routed
+        through the engagement pipeline (Safety Filter, Persona Engine,
+        Threat Parser). Non-scam verdicts are logged at debug level.
 
         Args:
             email_msg: Parsed and validated EmailMessage to process.
@@ -333,7 +424,285 @@ class EmailIngestionModule:
                 result.confidence,
                 result.determining_stage,
             )
+
+            if result.verdict == "scam":
+                self._total_scam += 1
+                self._feed_to_pipeline(email_msg, result)
+            else:
+                self._total_not_scam += 1
+                logger.debug(
+                    "Email from %s classified as not_scam, skipping pipeline",
+                    email_msg.sender,
+                )
+
+            # Store classification in pending results
+            self._enqueue_result("classification", result.model_dump())
+
         except Exception as e:
             logger.warning(
                 "Failed to classify email from %s: %s", email_msg.sender, e
             )
+
+    def _feed_to_pipeline(
+        self, email_msg: EmailMessage, classification: ClassificationResult
+    ) -> None:
+        """Route a confirmed scam email through the engagement pipeline.
+
+        Steps:
+        1. Run Safety Filter scan on email body
+        2. If blocked (>=80% injection tokens): call _handle_blocked_message
+        3. Otherwise: generate persona response and extract IoCs
+        4. Update/create conversation thread for sender (Task 8.3)
+        5. Store results in pending buffer
+
+        Args:
+            email_msg: The confirmed scam email.
+            classification: The ClassificationResult from the classifier.
+        """
+        from components.safety_filter import SafetyFilter
+        from components.threat_parser import ThreatParser
+
+        try:
+            # Step 1: Safety Filter scan
+            safety_filter = SafetyFilter()
+            scan_result = safety_filter.scan(email_msg.body)
+
+            # Step 2: Branch on blocked status
+            if scan_result.is_blocked:
+                self._handle_blocked_message(email_msg)
+                return
+
+            # Step 3: Generate persona response with thread context
+            thread_history = self._get_thread_history(email_msg.sender)
+            response_content = self._generate_persona_response(
+                scan_result.sanitized_content, thread_history
+            )
+
+            # Step 4: Extract IoCs via Threat Parser
+            threat_parser = ThreatParser()
+            extraction_result = self._run_extraction(
+                threat_parser, email_msg.body
+            )
+
+            # Step 5: Update thread (Task 8.3)
+            self._update_thread(email_msg)
+
+            # Step 6: Queue outbound response
+            outbound = OutboundEmail(
+                to_address=email_msg.reply_to or email_msg.sender,
+                subject=f"Re: {email_msg.subject}"[:255],
+                body=response_content,
+                in_reply_to=email_msg.message_id,
+            )
+            self._enqueue_result("outbound", outbound.model_dump())
+
+            if extraction_result and extraction_result.iocs:
+                logger.info(
+                    "Extracted %d IoCs from scam email (sender=%s)",
+                    len(extraction_result.iocs),
+                    email_msg.sender,
+                )
+
+        except Exception as e:
+            logger.warning(
+                "Pipeline processing failed for email from %s: %s",
+                email_msg.sender,
+                e,
+            )
+
+    def _handle_blocked_message(self, email_msg: EmailMessage) -> None:
+        """Handle an email that was fully blocked by the Safety Filter.
+
+        Stores a default confused-elder response and still invokes
+        Threat Parser for IoC extraction.
+
+        Args:
+            email_msg: The blocked email message.
+        """
+        from components.threat_parser import ThreatParser
+
+        try:
+            # Store default response as outbound
+            outbound = OutboundEmail(
+                to_address=email_msg.reply_to or email_msg.sender,
+                subject=f"Re: {email_msg.subject}"[:255],
+                body=_DEFAULT_BLOCKED_RESPONSE,
+                in_reply_to=email_msg.message_id,
+            )
+            self._enqueue_result("outbound", outbound.model_dump())
+
+            # Still extract IoCs from the blocked message
+            threat_parser = ThreatParser()
+            extraction_result = self._run_extraction(
+                threat_parser, email_msg.body
+            )
+
+            if extraction_result and extraction_result.iocs:
+                logger.info(
+                    "Extracted %d IoCs from blocked email (sender=%s)",
+                    len(extraction_result.iocs),
+                    email_msg.sender,
+                )
+
+            # Update thread even for blocked messages
+            self._update_thread(email_msg)
+
+        except Exception as e:
+            logger.warning(
+                "Blocked message handling failed for %s: %s",
+                email_msg.sender,
+                e,
+            )
+
+    def _generate_persona_response(
+        self, sanitized_content: str, thread_history: list[dict[str, str]]
+    ) -> str:
+        """Generate a persona response using the PersonaEngine.
+
+        Falls back to the default blocked response if PersonaEngine
+        initialization or generation fails.
+
+        Args:
+            sanitized_content: The safety-filtered email body.
+            thread_history: Previous messages in this thread for context.
+
+        Returns:
+            The generated or fallback response string.
+        """
+        from models.chat_models import ChatMessage
+
+        try:
+            from components.persona_engine import PersonaEngine
+
+            persona = PersonaEngine(llm_client=None)
+
+            # Build conversation history from thread
+            history: list[ChatMessage] = []
+            for entry in thread_history:
+                history.append(ChatMessage(
+                    sender=entry.get("sender", "scammer"),
+                    content=entry.get("content", ""),
+                ))
+
+            response = persona.generate_response(sanitized_content, history)
+            return response.content
+
+        except Exception as e:
+            logger.warning("Persona generation failed, using fallback: %s", e)
+            return _DEFAULT_BLOCKED_RESPONSE
+
+    def _run_extraction(self, threat_parser: Any, message_body: str) -> Any:
+        """Run async IoC extraction in a new event loop.
+
+        Args:
+            threat_parser: ThreatParser instance.
+            message_body: The raw email body to extract from.
+
+        Returns:
+            ExtractionResult or None on failure.
+        """
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    threat_parser.extract_iocs(message_body)
+                )
+                return result
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.warning("IoC extraction failed: %s", e)
+            return None
+
+    # --- Thread Management (Task 8.3) ---
+
+    def _get_thread_history(self, sender: str) -> list[dict[str, str]]:
+        """Get conversation history for a sender's thread.
+
+        Args:
+            sender: The sender email address.
+
+        Returns:
+            List of message dicts with 'sender' and 'content' keys.
+        """
+        thread = self._threads.get(sender)
+        if thread is None:
+            return []
+        messages: list[dict[str, str]] = thread.get("messages", [])
+        return messages
+
+    def _update_thread(self, email_msg: EmailMessage) -> None:
+        """Update or create a conversation thread for the sender.
+
+        If the sender already has a thread, appends to it. Otherwise
+        creates a new thread entry.
+
+        Args:
+            email_msg: The email message to add to the thread.
+        """
+        sender = email_msg.sender
+
+        if sender not in self._threads:
+            self._threads[sender] = {
+                "sender_address": sender,
+                "subject": email_msg.subject,
+                "message_ids": [email_msg.message_id],
+                "source_channel": "email",
+                "message_count": 1,
+                "messages": [
+                    {"sender": "scammer", "content": email_msg.body}
+                ],
+            }
+        else:
+            thread = self._threads[sender]
+            thread["message_count"] = thread.get("message_count", 0) + 1
+            if email_msg.message_id:
+                thread.setdefault("message_ids", []).append(
+                    email_msg.message_id
+                )
+            thread.setdefault("messages", []).append(
+                {"sender": "scammer", "content": email_msg.body}
+            )
+
+        # Enqueue thread update for session state sync
+        thread_data = {
+            "sender_address": sender,
+            "subject": self._threads[sender].get("subject", ""),
+            "message_ids": self._threads[sender].get("message_ids", []),
+            "source_channel": "email",
+            "message_count": self._threads[sender].get("message_count", 0),
+        }
+        self._enqueue_result("thread_update", thread_data, sender=sender)
+
+    # --- Internal helpers ---
+
+    def _enqueue_result(
+        self, result_type: str, data: Any, sender: str | None = None
+    ) -> None:
+        """Thread-safe enqueue of a pipeline result.
+
+        Args:
+            result_type: One of 'classification', 'outbound', 'thread_update',
+                'counters'.
+            data: The serializable result data.
+            sender: Sender address (required for thread_update type).
+        """
+        entry: dict[str, Any] = {"type": result_type, "data": data}
+        if sender is not None:
+            entry["sender"] = sender
+        with self._lock:
+            self._pending_results.append(entry)
+
+    def _enqueue_counter_update(self) -> None:
+        """Enqueue a counter snapshot for session state sync."""
+        entry: dict[str, Any] = {
+            "type": "counters",
+            "data": None,
+            "total_fetched": self._total_fetched,
+            "total_scam": self._total_scam,
+            "total_not_scam": self._total_not_scam,
+            "outbound_sent": self._outbound_sent,
+        }
+        with self._lock:
+            self._pending_results.append(entry)
