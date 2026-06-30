@@ -409,10 +409,9 @@ def process_scammer_message(
     try:
         st.session_state["parser_status"] = "running"
         # Capture session state reference for the background thread
-        # (background threads can't access st.session_state directly)
         session_state_ref = st.session_state
-        # Submit extraction to thread pool (non-blocking for Streamlit)
-        _extraction_executor.submit(
+        # Submit extraction and wait with timeout so IoCs appear immediately
+        future = _extraction_executor.submit(
             _run_extraction_pipeline,
             message_for_extraction,
             threat_parser,
@@ -420,6 +419,11 @@ def process_scammer_message(
             notification_module,
             session_state_ref,
         )
+        try:
+            future.result(timeout=8.0)
+        except Exception as e:
+            logger.warning("Extraction did not complete in time: %s", e)
+            st.session_state["parser_status"] = "idle"
     except Exception as e:
         error = PipelineError("Threat_Parser", f"Extraction dispatch failed: {e}", e)
         logger.error(str(error), exc_info=True)
