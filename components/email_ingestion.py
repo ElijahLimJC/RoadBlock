@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Bounds for polling interval in seconds
-_MIN_POLLING_INTERVAL = 10
+_MIN_POLLING_INTERVAL = 5
 _MAX_POLLING_INTERVAL = 300
 
 # Consecutive failure threshold for degraded warning
