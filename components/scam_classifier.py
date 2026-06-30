@@ -11,7 +11,7 @@ scam emails into the Safety_Filter -> Persona_Engine engagement loop.
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from models.email_models import ClassificationResult, EmailMessage, ScamPattern
@@ -276,7 +276,7 @@ class ScamClassifier:
             determining_stage="stage_2",
             matched_patterns=matched,
             llm_reasoning=validated["reasoning"],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             subject=subject,
         )
 
@@ -329,7 +329,7 @@ class ScamClassifier:
             confidence=stage_1_confidence,
             determining_stage="stage_1",
             matched_patterns=matched_patterns,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             subject=subject,
         )
 
@@ -355,7 +355,7 @@ class ScamClassifier:
                 confidence=confidence,
                 determining_stage="stage_1",
                 matched_patterns=matched,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 sender=email.sender,
                 subject=email.subject,
             )

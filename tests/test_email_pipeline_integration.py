@@ -16,6 +16,7 @@ from components.email_ingestion import (
     _DEGRADED_FAILURE_THRESHOLD,
     EmailIngestionModule,
 )
+from components.smtp_client import SMTPClient
 from models.email_models import (
     ClassificationResult,
     EmailMessage,
@@ -111,6 +112,9 @@ def _build_module(
     smtp_client = smtp_mock or MagicMock()
     llm_client = llm_mock or MagicMock()
 
+    # Ensure compose_reply_subject returns a real string
+    smtp_client.compose_reply_subject = SMTPClient.compose_reply_subject
+
     classifier_from_components = _build_classifier(llm_client)
 
     module = EmailIngestionModule(
@@ -145,7 +149,7 @@ class TestEndToEndScamFlow:
         # Setup mocks
         imap_mock = MagicMock()
         imap_mock.is_connected = True
-        imap_mock.fetch_unread.return_value = [_make_scam_email_bytes()]
+        imap_mock.fetch_unread.return_value = [("1", _make_scam_email_bytes())]
 
         smtp_mock = MagicMock()
         llm_mock = MagicMock()

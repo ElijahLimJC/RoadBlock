@@ -208,9 +208,28 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
     )
 
     patterns = _get_default_scam_patterns()
+
+    # Initialize LLM client for Stage 2 classification if API key available
+    llm_client = None
+    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+    if gemini_api_key:
+        try:
+            import google.generativeai as genai
+
+            genai.configure(api_key=gemini_api_key)
+            llm_client = genai.GenerativeModel("gemini-1.5-flash")
+            logger.info("Stage 2 LLM classification enabled (Gemini)")
+        except Exception as e:
+            logger.warning("Failed to initialize Gemini LLM client: %s", e)
+    else:
+        logger.info(
+            "GEMINI_API_KEY not set; Stage 2 LLM disabled, "
+            "falling back to regex-only classification"
+        )
+
     scam_classifier = ScamClassifier(
         patterns=patterns,
-        llm_client=None,
+        llm_client=llm_client,
         confidence_threshold=0.7,
         fallback_threshold=0.3,
     )

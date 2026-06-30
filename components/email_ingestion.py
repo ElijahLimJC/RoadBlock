@@ -188,6 +188,9 @@ class EmailIngestionModule:
                 state_dict["threads"] = threads
 
             elif result_type == "counters":
+                state_dict["connection_status"] = result.get(
+                    "connection_status", state_dict.get("connection_status", "disconnected")
+                )
                 state_dict["total_fetched"] = result.get(
                     "total_fetched", state_dict.get("total_fetched", 0)
                 )
@@ -363,11 +366,18 @@ class EmailIngestionModule:
 
                 raw_emails = self._imap_client.fetch_unread()
 
-                for raw_bytes in raw_emails:
+                for uid, raw_bytes in raw_emails:
                     email_msg = self._parse_email(raw_bytes)
                     if email_msg is not None:
                         self._total_fetched += 1
                         self.process_email(email_msg)
+                    # Mark as read regardless (REQ 1.4 + REQ 1.6: even malformed get marked)
+                    mark_ok = self._imap_client.mark_as_read(uid)
+                    if not mark_ok:
+                        logger.warning(
+                            "Failed to mark UID %s as read; will re-fetch next cycle",
+                            uid,
+                        )
 
                 # Success: reset failure counter and degraded flag
                 self._consecutive_failures = 0
@@ -478,6 +488,12 @@ class EmailIngestionModule:
                 scan_result.sanitized_content, thread_history
             )
 
+            # Add persona response to thread history
+            if email_msg.sender in self._threads:
+                self._threads[email_msg.sender].setdefault("messages", []).append(
+                    {"sender": "persona", "content": response_content}
+                )
+
             # Step 4: Extract IoCs via Threat Parser
             threat_parser = ThreatParser()
             extraction_result = self._run_extraction(
@@ -490,7 +506,7 @@ class EmailIngestionModule:
             # Step 6: Queue outbound response
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
-                subject=f"Re: {email_msg.subject}"[:255],
+                subject=self._smtp_client.compose_reply_subject(email_msg.subject),
                 body=response_content,
                 in_reply_to=email_msg.message_id,
             )
@@ -525,11 +541,17 @@ class EmailIngestionModule:
             # Store default response as outbound
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
-                subject=f"Re: {email_msg.subject}"[:255],
+                subject=self._smtp_client.compose_reply_subject(email_msg.subject),
                 body=_DEFAULT_BLOCKED_RESPONSE,
                 in_reply_to=email_msg.message_id,
             )
             self._enqueue_result("outbound", outbound.model_dump())
+
+            # Add default persona response to thread history
+            if email_msg.sender in self._threads:
+                self._threads[email_msg.sender].setdefault("messages", []).append(
+                    {"sender": "persona", "content": _DEFAULT_BLOCKED_RESPONSE}
+                )
 
             # Still extract IoCs from the blocked message
             threat_parser = ThreatParser()
@@ -696,6 +718,7 @@ class EmailIngestionModule:
 
     def _enqueue_counter_update(self) -> None:
         """Enqueue a counter snapshot for session state sync."""
+        connection = "connected" if self._imap_client.is_connected else "disconnected"
         entry: dict[str, Any] = {
             "type": "counters",
             "data": None,
@@ -703,6 +726,7 @@ class EmailIngestionModule:
             "total_scam": self._total_scam,
             "total_not_scam": self._total_not_scam,
             "outbound_sent": self._outbound_sent,
+            "connection_status": connection,
         }
         with self._lock:
             self._pending_results.append(entry)
