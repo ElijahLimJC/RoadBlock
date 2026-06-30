@@ -221,7 +221,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
             import google.generativeai as genai
 
             genai.configure(api_key=gemini_api_key)
-            llm_client = genai.GenerativeModel("gemini-1.5-flash")
+            llm_client = genai.GenerativeModel("gemini-2.5-flash-lite")
             logger.info("Stage 2 LLM classification enabled (Gemini)")
         except Exception as e:
             logger.warning("Failed to initialize Gemini LLM client: %s", e)
@@ -644,7 +644,7 @@ with input_col:
                     import google.generativeai as genai
 
                     genai.configure(api_key=gemini_key)
-                    llm_client = genai.GenerativeModel("gemini-1.5-flash")
+                    llm_client = genai.GenerativeModel("gemini-2.5-flash")
                     persona = PersonaEngine(llm_client=llm_client)
                 except Exception as e:
                     logger.warning("Failed to init PersonaEngine with Gemini: %s", e)
