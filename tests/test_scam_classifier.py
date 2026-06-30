@@ -278,3 +278,291 @@ class TestFallbackGreaterThanConfidenceRejection:
                 confidence_threshold=confidence,
                 fallback_threshold=fallback,
             )
+
+
+# ---------------------------------------------------------------------------
+# Property 6: Threshold routing correctness (Task 4.3)
+# ---------------------------------------------------------------------------
+
+
+class TestThresholdRoutingCorrectness:
+    """Property 6: Threshold routing correctness.
+
+    **Validates: Requirements 2.3, 2.4, 3.3, 3.4**
+
+    For any valid EmailMessage and valid threshold configuration:
+    - If Stage 1 confidence >= threshold, determining_stage == "stage_1"
+      (scam classified without LLM).
+    - If Stage 1 confidence < threshold, Stage 2 LLM is invoked.
+    """
+
+    @given(
+        patterns=pattern_list_strategy,
+        subject=st.text(min_size=1, max_size=100),
+        body=st.text(min_size=1, max_size=300).filter(lambda x: x.strip() != ""),
+        confidence_threshold=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+    )
+    @settings(max_examples=200)
+    def test_high_confidence_skips_llm(
+        self,
+        patterns: list[ScamPattern],
+        subject: str,
+        body: str,
+        confidence_threshold: float,
+    ) -> None:
+        """If Stage 1 confidence >= threshold, result uses stage_1 without LLM."""
+        from unittest.mock import MagicMock
+
+        from models.email_models import EmailMessage
+
+        mock_llm = MagicMock()
+
+        classifier = ScamClassifier(
+            patterns=patterns,
+            llm_client=mock_llm,
+            confidence_threshold=confidence_threshold,
+            fallback_threshold=0.0,
+        )
+
+        # Compute what Stage 1 would produce
+        stage_1_score = classifier._stage_1_regex(subject, body)
+
+        # Build a valid EmailMessage
+        try:
+            email = EmailMessage(
+                sender="test@example.com",
+                subject=subject,
+                body=body,
+            )
+        except Exception:
+            # If EmailMessage validation rejects the generated content, skip
+            assume(False)
+            return
+
+        result = classifier.classify(email)
+
+        if stage_1_score >= confidence_threshold:
+            assert result.determining_stage == "stage_1", (
+                f"Expected stage_1 when score {stage_1_score} >= "
+                f"threshold {confidence_threshold}, "
+                f"got {result.determining_stage}"
+            )
+            # LLM should NOT have been called
+            mock_llm.generate_content.assert_not_called()
+
+    @given(
+        patterns=pattern_list_strategy,
+        subject=st.text(min_size=1, max_size=100),
+        body=st.text(min_size=1, max_size=300).filter(lambda x: x.strip() != ""),
+        confidence_threshold=st.floats(
+            min_value=0.01, max_value=0.99, allow_nan=False, allow_infinity=False
+        ),
+    )
+    @settings(max_examples=200)
+    def test_low_confidence_invokes_llm(
+        self,
+        patterns: list[ScamPattern],
+        subject: str,
+        body: str,
+        confidence_threshold: float,
+    ) -> None:
+        """If Stage 1 confidence < threshold, Stage 2 LLM is invoked."""
+        from unittest.mock import MagicMock
+
+        from models.email_models import EmailMessage
+
+        # Mock LLM that returns a valid JSON response
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = '{"verdict": "scam", "reasoning": "test reasoning"}'
+        mock_llm.generate_content.return_value = mock_response
+
+        classifier = ScamClassifier(
+            patterns=patterns,
+            llm_client=mock_llm,
+            confidence_threshold=confidence_threshold,
+            fallback_threshold=0.0,
+        )
+
+        # Compute what Stage 1 would produce
+        stage_1_score = classifier._stage_1_regex(subject, body)
+
+        # Build a valid EmailMessage
+        try:
+            email = EmailMessage(
+                sender="test@example.com",
+                subject=subject,
+                body=body,
+            )
+        except Exception:
+            assume(False)
+            return
+
+        result = classifier.classify(email)
+
+        if stage_1_score < confidence_threshold:
+            # LLM should have been called
+            mock_llm.generate_content.assert_called_once()
+            assert result.determining_stage == "stage_2", (
+                f"Expected stage_2 when score {stage_1_score} < "
+                f"threshold {confidence_threshold}, "
+                f"got {result.determining_stage}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Property 9: LLM response validation rejects non-conforming output (Task 4.4)
+# ---------------------------------------------------------------------------
+
+
+class TestLLMResponseValidationRejectsNonConforming:
+    """Property 9: LLM response validation rejects non-conforming output.
+
+    **Validates: Requirements 2.7, 2.9**
+
+    For any string that does not conform to the expected JSON schema,
+    _validate_llm_response SHALL return None.
+    """
+
+    @given(
+        arbitrary_text=st.text(min_size=0, max_size=500),
+    )
+    @settings(max_examples=200)
+    def test_non_json_strings_rejected(self, arbitrary_text: str) -> None:
+        """Non-JSON strings are rejected by _validate_llm_response."""
+        import json
+
+        # Filter out strings that happen to be valid conforming JSON
+        try:
+            data = json.loads(arbitrary_text)
+            if (
+                isinstance(data, dict)
+                and data.get("verdict") in ("scam", "not-scam")
+                and isinstance(data.get("reasoning"), str)
+            ):
+                assume(False)
+        except (json.JSONDecodeError, TypeError):
+            pass  # This is what we want: non-JSON strings
+
+        classifier = ScamClassifier(
+            patterns=[],
+            llm_client=None,
+            confidence_threshold=0.7,
+            fallback_threshold=0.3,
+        )
+
+        result = classifier._validate_llm_response(arbitrary_text)
+        assert result is None, (
+            f"Expected None for non-conforming input, got {result}"
+        )
+
+    @given(
+        wrong_verdict=st.text(min_size=1, max_size=50).filter(
+            lambda x: x not in ("scam", "not-scam")
+        ),
+        reasoning=st.text(min_size=1, max_size=100),
+    )
+    @settings(max_examples=200)
+    def test_json_with_wrong_verdict_rejected(
+        self, wrong_verdict: str, reasoning: str
+    ) -> None:
+        """JSON with invalid verdict values is rejected."""
+        import json
+
+        payload = json.dumps({"verdict": wrong_verdict, "reasoning": reasoning})
+
+        classifier = ScamClassifier(
+            patterns=[],
+            llm_client=None,
+            confidence_threshold=0.7,
+            fallback_threshold=0.3,
+        )
+
+        result = classifier._validate_llm_response(payload)
+        assert result is None, (
+            f"Expected None for wrong verdict '{wrong_verdict}', got {result}"
+        )
+
+    @given(
+        verdict=st.sampled_from(["scam", "not-scam"]),
+    )
+    @settings(max_examples=200)
+    def test_json_missing_reasoning_rejected(self, verdict: str) -> None:
+        """JSON without 'reasoning' field is rejected."""
+        import json
+
+        payload = json.dumps({"verdict": verdict})
+
+        classifier = ScamClassifier(
+            patterns=[],
+            llm_client=None,
+            confidence_threshold=0.7,
+            fallback_threshold=0.3,
+        )
+
+        result = classifier._validate_llm_response(payload)
+        assert result is None, (
+            f"Expected None for missing reasoning, got {result}"
+        )
+
+    @given(
+        verdict=st.sampled_from(["scam", "not-scam"]),
+        non_string_reasoning=st.one_of(
+            st.integers(),
+            st.floats(allow_nan=False),
+            st.booleans(),
+            st.lists(st.integers(), max_size=3),
+            st.none(),
+        ),
+    )
+    @settings(max_examples=200)
+    def test_json_with_non_string_reasoning_rejected(
+        self, verdict: str, non_string_reasoning: object
+    ) -> None:
+        """JSON with non-string 'reasoning' field is rejected."""
+        import json
+
+        payload = json.dumps({"verdict": verdict, "reasoning": non_string_reasoning})
+
+        classifier = ScamClassifier(
+            patterns=[],
+            llm_client=None,
+            confidence_threshold=0.7,
+            fallback_threshold=0.3,
+        )
+
+        result = classifier._validate_llm_response(payload)
+        assert result is None, (
+            f"Expected None for non-string reasoning "
+            f"{type(non_string_reasoning).__name__}, got {result}"
+        )
+
+    @given(
+        data=st.one_of(
+            st.integers(),
+            st.floats(allow_nan=False),
+            st.booleans(),
+            st.lists(st.integers(), max_size=3),
+        ),
+    )
+    @settings(max_examples=200)
+    def test_valid_json_but_not_dict_rejected(self, data: object) -> None:
+        """Valid JSON that is not a dict is rejected."""
+        import json
+
+        payload = json.dumps(data)
+
+        classifier = ScamClassifier(
+            patterns=[],
+            llm_client=None,
+            confidence_threshold=0.7,
+            fallback_threshold=0.3,
+        )
+
+        result = classifier._validate_llm_response(payload)
+        assert result is None, (
+            f"Expected None for non-dict JSON ({type(data).__name__}), "
+            f"got {result}"
+        )
