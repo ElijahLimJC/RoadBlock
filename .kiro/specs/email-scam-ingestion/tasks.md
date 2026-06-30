@@ -16,20 +16,20 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - All models use `ConfigDict(frozen=True)` and Pydantic v2 field_validators
     - _Requirements: 6.1, 6.2, 6.3, 6.5, 6.6, 6.7, 1.3, 5.1_
 
-  - [ ] 1.2 Write property test: EmailMessage serialization round-trip (Property 1)
+  - [x] 1.2 Write property test: EmailMessage serialization round-trip (Property 1)
     - **Property 1: Email_Message serialization round-trip**
     - Use Hypothesis to generate valid EmailMessage instances with arbitrary RFC 5322 addresses, subjects, bodies
     - Assert `EmailMessage.model_validate_json(email.model_dump_json())` produces identical sender, subject, body, timestamp
     - **Validates: Requirements 1.7, 6.6**
 
-  - [ ] 1.3 Write property test: ClassificationResult serialization round-trip (Property 2)
+  - [x] 1.3 Write property test: ClassificationResult serialization round-trip (Property 2)
     - **Property 2: Classification_Result serialization round-trip**
     - Use Hypothesis to generate valid ClassificationResult instances with sampled verdicts, float confidences, stages
     - Assert round-trip JSON serialization/deserialization preserves verdict, confidence, determining_stage
     - **Validates: Requirements 6.7**
 
 - [ ] 2. Implement the Scam_Classifier regex engine (Stage 1)
-  - [ ] 2.1 Create `components/scam_classifier.py` with ScamClassifier class and Stage 1 regex scoring
+  - [x] 2.1 Create `components/scam_classifier.py` with ScamClassifier class and Stage 1 regex scoring
     - Implement `__init__` accepting patterns list, llm_client, confidence_threshold (default 0.7), fallback_threshold (default 0.3), llm_timeout (10s)
     - Add threshold validation: both must be in [0.0, 1.0], fallback must not exceed confidence threshold — raise ValueError on violation
     - Compile all regex patterns at init; log warning and skip invalid patterns; if zero valid patterns remain, return 0.0 for all Stage 1 calls
@@ -61,7 +61,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Assert ScamClassifier raises ValueError at init for invalid confidence or fallback thresholds
     - **Validates: Requirements 3.5, 3.6**
 
-  - [ ] 2.6 Write property test: Fallback-greater-than-confidence rejection (Property 8)
+  - [x] 2.6 Write property test: Fallback-greater-than-confidence rejection (Property 8)
     - **Property 8: Fallback-greater-than-confidence rejection**
     - Use Hypothesis to generate pairs where fallback > confidence (both in [0.0, 1.0])
     - Assert ScamClassifier raises ValueError at init
@@ -98,7 +98,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - **Validates: Requirements 2.7, 2.9**
 
 - [ ] 5. Implement IMAP_Client component
-  - [ ] 5.1 Create `components/imap_client.py` with IMAPClient class
+  - [x] 5.1 Create `components/imap_client.py` with IMAPClient class
     - Implement `__init__` loading host, port, username, password from environment variables with 10s connection timeout
     - Implement `connect()` establishing SSL/TLS connection and authenticating
     - Implement `fetch_unread()` returning list of raw email bytes for all unread messages
@@ -119,7 +119,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - _Requirements: 1.1, 1.4, 1.5, 1.8, 1.9_
 
 - [ ] 6. Implement SMTP_Client component
-  - [ ] 6.1 Create `components/smtp_client.py` with SMTPClient class
+  - [x] 6.1 Create `components/smtp_client.py` with SMTPClient class
     - Implement `__init__` loading host, port, username, password, sender_address from environment variables with 30s timeout
     - Implement `send_reply(to_address, subject, body, in_reply_to, references)` composing reply with STARTTLS/TLS, In-Reply-To and References headers
     - Implement reply subject: "Re: " + original subject truncated to combined max 255 chars
