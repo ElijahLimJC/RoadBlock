@@ -405,23 +405,15 @@ def process_scammer_message(
     try:
         st.session_state["parser_status"] = "running"
         # Submit extraction to thread pool (non-blocking for Streamlit)
-        future = _extraction_executor.submit(
+        # Do NOT block the main thread waiting for result — let it complete
+        # asynchronously. The extraction function updates session_state directly.
+        _extraction_executor.submit(
             _run_extraction_pipeline,
             message_for_extraction,
             threat_parser,
             mcp_client,
             notification_module,
         )
-        # Wait for extraction to complete (with remaining time budget)
-        # The async parser has its own 5s internal timeout
-        # We give it up to 10s from the thread pool perspective
-        remaining_time = max(1.0, 10.0)
-        try:
-            future.result(timeout=remaining_time)
-        except Exception as e:
-            logger.warning("Async extraction did not complete in time: %s", e)
-            st.session_state["parser_status"] = "error"
-            st.session_state["last_error"] = f"Extraction timeout: {e}"
     except Exception as e:
         error = PipelineError("Threat_Parser", f"Extraction dispatch failed: {e}", e)
         logger.error(str(error), exc_info=True)
