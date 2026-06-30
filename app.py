@@ -242,7 +242,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         imap_client=imap_client,
         smtp_client=smtp_client,
         scam_classifier=scam_classifier,
-        polling_interval=30,
+        polling_interval=10,
     )
 
     st.session_state.email_ingestion_module = module
@@ -590,10 +590,10 @@ if "email_ingestion_module" not in st.session_state:
 if st.session_state.get("email_ingestion_module") is not None:
     _email_module = st.session_state.email_ingestion_module
     _email_module.flush_to_session_state(st.session_state.email_ingestion)
-    # Also update connection status directly (don't wait for poll cycle)
-    if _email_module._imap_client.is_connected:
+    # Use module's internal state for connection status (avoid NOOP race with bg thread)
+    if _email_module._polling and _email_module._consecutive_failures == 0:
         st.session_state.email_ingestion["connection_status"] = "connected"
-    else:
+    elif _email_module._consecutive_failures >= 3:
         st.session_state.email_ingestion["connection_status"] = "disconnected"
     _email_module._smtp_client.process_retry_queue()
 
