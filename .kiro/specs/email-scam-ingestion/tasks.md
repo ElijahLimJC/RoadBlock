@@ -7,7 +7,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
 ## Tasks
 
 - [ ] 1. Create Pydantic data models for email ingestion
-  - [ ] 1.1 Create `models/email_models.py` with EmailMessage, ClassificationResult, ScamPattern, OutboundEmail, and EmailThreadMetadata models
+  - [x] 1.1 Create `models/email_models.py` with EmailMessage, ClassificationResult, ScamPattern, OutboundEmail, and EmailThreadMetadata models
     - Implement `EmailMessage` with RFC 5322 sender validation (max 254 chars), subject (max 998 chars), body (non-empty, max 1,000,000 chars), message_id, reply_to, date_header, and UTC timestamp
     - Implement `ClassificationResult` with Literal verdict ("scam"/"not_scam"), confidence (0.0–1.0), determining_stage (Literal "stage_1"/"stage_2"), matched_patterns list, llm_reasoning string, timestamp, sender, subject
     - Implement `ScamPattern` with name, regex string, category (Literal urgency/financial_lure/impersonation/phishing), weight (0.0–1.0)
@@ -16,13 +16,13 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - All models use `ConfigDict(frozen=True)` and Pydantic v2 field_validators
     - _Requirements: 6.1, 6.2, 6.3, 6.5, 6.6, 6.7, 1.3, 5.1_
 
-  - [ ]* 1.2 Write property test: EmailMessage serialization round-trip (Property 1)
+  - [ ] 1.2 Write property test: EmailMessage serialization round-trip (Property 1)
     - **Property 1: Email_Message serialization round-trip**
     - Use Hypothesis to generate valid EmailMessage instances with arbitrary RFC 5322 addresses, subjects, bodies
     - Assert `EmailMessage.model_validate_json(email.model_dump_json())` produces identical sender, subject, body, timestamp
     - **Validates: Requirements 1.7, 6.6**
 
-  - [ ]* 1.3 Write property test: ClassificationResult serialization round-trip (Property 2)
+  - [ ] 1.3 Write property test: ClassificationResult serialization round-trip (Property 2)
     - **Property 2: Classification_Result serialization round-trip**
     - Use Hypothesis to generate valid ClassificationResult instances with sampled verdicts, float confidences, stages
     - Assert round-trip JSON serialization/deserialization preserves verdict, confidence, determining_stage
@@ -37,31 +37,31 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Treat missing/empty subject as empty string for matching
     - _Requirements: 2.1, 2.2, 2.3, 2.12, 3.1, 3.2, 3.5, 3.6, 3.7, 7.1, 7.2, 7.3, 7.4_
 
-  - [ ]* 2.2 Write property test: Confidence score bounded output (Property 3)
+  - [ ] 2.2 Write property test: Confidence score bounded output (Property 3)
     - **Property 3: Confidence score bounded output**
     - Use Hypothesis to generate arbitrary pattern sets with random weights and email content
     - Assert Stage 1 confidence score is always >= 0.0 and <= 1.0
     - **Validates: Requirements 7.6**
 
-  - [ ]* 2.3 Write property test: Zero-weight pattern invariant (Property 4)
+  - [ ] 2.3 Write property test: Zero-weight pattern invariant (Property 4)
     - **Property 4: Zero-weight pattern invariant**
     - Use Hypothesis to generate pattern sets and emails, then add a pattern with weight 0.0
     - Assert confidence score is unchanged after adding the zero-weight pattern
     - **Validates: Requirements 7.5**
 
-  - [ ]* 2.4 Write property test: Stage 1 classification determinism (Property 5)
+  - [ ] 2.4 Write property test: Stage 1 classification determinism (Property 5)
     - **Property 5: Stage 1 regex classification determinism**
     - Use Hypothesis to generate emails and fixed classifier configs
     - Assert classifying the same email twice produces identical verdict, confidence, determining_stage
     - **Validates: Requirements 2.11**
 
-  - [ ]* 2.5 Write property test: Threshold validation rejects invalid ranges (Property 7)
+  - [ ] 2.5 Write property test: Threshold validation rejects invalid ranges (Property 7)
     - **Property 7: Threshold validation rejects invalid ranges**
     - Use Hypothesis to generate float values outside [0.0, 1.0]
     - Assert ScamClassifier raises ValueError at init for invalid confidence or fallback thresholds
     - **Validates: Requirements 3.5, 3.6**
 
-  - [ ]* 2.6 Write property test: Fallback-greater-than-confidence rejection (Property 8)
+  - [ ] 2.6 Write property test: Fallback-greater-than-confidence rejection (Property 8)
     - **Property 8: Fallback-greater-than-confidence rejection**
     - Use Hypothesis to generate pairs where fallback > confidence (both in [0.0, 1.0])
     - Assert ScamClassifier raises ValueError at init
@@ -85,13 +85,13 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Return full ClassificationResult with all fields populated
     - _Requirements: 2.3, 2.4, 2.12_
 
-  - [ ]* 4.3 Write property test: Threshold routing correctness (Property 6)
+  - [ ] 4.3 Write property test: Threshold routing correctness (Property 6)
     - **Property 6: Threshold routing correctness**
     - Use Hypothesis to generate emails and valid thresholds
     - Assert: if confidence >= threshold then determining_stage == "stage_1"; if < threshold then Stage 2 was invoked
     - **Validates: Requirements 2.3, 2.4, 3.3, 3.4**
 
-  - [ ]* 4.4 Write property test: LLM response validation rejects non-conforming output (Property 9)
+  - [ ] 4.4 Write property test: LLM response validation rejects non-conforming output (Property 9)
     - **Property 9: LLM response validation rejects non-conforming output**
     - Use Hypothesis to generate arbitrary strings that don't conform to expected JSON schema
     - Assert `_validate_llm_response` returns None for all non-conforming inputs
@@ -109,7 +109,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Handle mark-as-read failures: log at warning, return False
     - _Requirements: 1.1, 1.2, 1.4, 1.5, 1.8, 1.9_
 
-  - [ ]* 5.2 Write unit tests for IMAP_Client
+  - [ ] 5.2 Write unit tests for IMAP_Client
     - Mock `imaplib.IMAP4_SSL` for all tests
     - Test successful connection and authentication
     - Test connection failure handling (timeout, auth error)
@@ -129,13 +129,13 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - After 3 consecutive failures for same message: mark "failed_permanent", cease retries
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 5.6, 5.7, 5.8_
 
-  - [ ]* 6.2 Write property test: Outbound subject line length invariant (Property 10)
+  - [ ] 6.2 Write property test: Outbound subject line length invariant (Property 10)
     - **Property 10: Outbound subject line length invariant**
     - Use Hypothesis to generate arbitrary subject strings of varying length
     - Assert composed reply subject ("Re: " + truncated original) never exceeds 255 characters
     - **Validates: Requirements 5.1**
 
-  - [ ]* 6.3 Write unit tests for SMTP_Client
+  - [ ] 6.3 Write unit tests for SMTP_Client
     - Mock `smtplib.SMTP` for all tests
     - Test successful send with threading headers
     - Test rate limiting enforcement (defer when exceeded)
@@ -174,7 +174,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Store EmailThreadMetadata in Chat_State email_ingestion.threads dict
     - _Requirements: 4.7_
 
-  - [ ]* 8.4 Write property test: Conversation threading by sender (Property 13)
+  - [ ] 8.4 Write property test: Conversation threading by sender (Property 13)
     - **Property 13: Conversation threading by sender**
     - Use Hypothesis to generate sequences of emails with repeated sender addresses
     - Assert all emails from the same sender are in the same thread and thread history accumulates
@@ -186,13 +186,13 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Implement classification log capacity management (evict oldest when > 200)
     - _Requirements: 8.1, 8.2_
 
-  - [ ]* 9.2 Write property test: Classification log capacity invariant (Property 11)
+  - [ ] 9.2 Write property test: Classification log capacity invariant (Property 11)
     - **Property 11: Classification log capacity invariant**
     - Use Hypothesis to generate sequences of ClassificationResults appended to the log
     - Assert log never exceeds 200 entries and oldest are evicted first
     - **Validates: Requirements 8.2**
 
-  - [ ]* 9.3 Write property test: Classification log ordering (Property 12)
+  - [ ] 9.3 Write property test: Classification log ordering (Property 12)
     - **Property 12: Classification log ordering**
     - Use Hypothesis to generate sets of ClassificationResults with varying timestamps
     - Assert displayed entries are in reverse chronological order (newest first)
@@ -206,7 +206,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Reflect connection status changes within rendering cycle
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-  - [ ]* 10.2 Write unit tests for SOC Dashboard email ingestion panel
+  - [ ] 10.2 Write unit tests for SOC Dashboard email ingestion panel
     - Test panel renders with empty state
     - Test panel renders with populated classification log
     - Test degraded warning display/clear
@@ -226,7 +226,7 @@ This plan implements an automated email ingestion pipeline for RoadBlock. The pi
     - Process retry queue on each poll cycle
     - _Requirements: 1.1, 4.1, 5.1, 5.2, 8.1_
 
-  - [ ]* 12.2 Write integration tests for full email pipeline flow
+  - [ ] 12.2 Write integration tests for full email pipeline flow
     - Test end-to-end: email fetch → classify → Safety_Filter → Persona_Engine → SMTP reply
     - Test blocked message flow: Safety_Filter blocks → default response → IoC extraction still runs
     - Test LLM fallback scenarios: timeout, malformed response, injection-like response
