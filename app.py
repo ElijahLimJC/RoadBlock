@@ -595,6 +595,38 @@ if st.session_state.get("email_ingestion_module") is not None:
         st.session_state.email_ingestion["connection_status"] = "connected"
     elif _email_module._consecutive_failures >= 3:
         st.session_state.email_ingestion["connection_status"] = "disconnected"
+
+    # Send any pending outbound emails via SMTP
+    _outbound_queue = st.session_state.email_ingestion.get("outbound_queue", [])
+    _sent_indices = []
+    for _idx, _outbound in enumerate(_outbound_queue):
+        if isinstance(_outbound, dict) and _outbound.get("status") in ("pending", "pending_retry"):
+            _success = _email_module._smtp_client.send_reply(
+                to_address=_outbound.get("to_address", ""),
+                subject=_outbound.get("subject", ""),
+                body=_outbound.get("body", ""),
+                in_reply_to=_outbound.get("in_reply_to") or None,
+                references=_outbound.get("references") or None,
+            )
+            if _success:
+                _outbound["status"] = "sent"
+                st.session_state.email_ingestion["outbound_sent"] = (
+                    st.session_state.email_ingestion.get("outbound_sent", 0) + 1
+                )
+                _sent_indices.append(_idx)
+            else:
+                _outbound["retry_count"] = _outbound.get("retry_count", 0) + 1
+                if _outbound["retry_count"] >= 3:
+                    _outbound["status"] = "failed_permanent"
+                    _sent_indices.append(_idx)
+                else:
+                    _outbound["status"] = "pending_retry"
+
+    # Remove sent/failed messages from queue
+    for _idx in sorted(_sent_indices, reverse=True):
+        _outbound_queue.pop(_idx)
+    st.session_state.email_ingestion["outbound_queue"] = _outbound_queue
+
     _email_module._smtp_client.process_retry_queue()
 
 # --- Import SOC Dashboard ---
