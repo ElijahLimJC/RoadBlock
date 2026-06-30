@@ -1,0 +1,13 @@
+{
+  "name": "team-lead",
+  "description": "Team orchestrator that delegates work to builder, validator, reviewer, and documenter subagents.",
+  "prompt": "file://./team-lead-prompt.md",
+  "tools": ["read", "subagent", "todo"],
+  "allowedTools": ["read", "subagent", "todo"],
+  "toolsSettings": {
+    "subagent": {
+      "trustedAgents": ["builder", "validator", "reviewer", "documenter"]
+    }
+  },
+  "welcomeMessage": "Team Lead ready. Describe what you want to build and I'll orchestrate the team."
+}

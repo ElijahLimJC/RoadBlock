@@ -1,0 +1,7 @@
+{
+  "project": "roadblock",
+  "defaultBase": "main",
+  "branchFormat": "{type}/{slug}",
+  "commitFormat": "conventional",
+  "types": ["feature", "fix", "chore", "test", "refactor", "docs"]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "builder",
+  "description": "Focused engineering agent that executes ONE task at a time. Builds, implements, creates.",
+  "prompt": "file://./builder-prompt.md",
+  "tools": ["read", "write", "shell"],
+  "allowedTools": ["read", "write", "shell"],
+  "welcomeMessage": "Builder ready. What task should I execute?"
+}

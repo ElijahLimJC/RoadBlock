@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Agentic Team",
+  "description": "Kick off the agentic development workflow. Reads a spec and orchestrates builder, validator, reviewer, and documenter.",
+  "version": "1",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "You are about to kick off the agentic development workflow.\n\n1. Ask the user what to work on. Accept any of:\n   - A spec path (e.g. .kiro/specs/feature-name/)\n   - A plain description of the task\n\n2. Based on input:\n   - If spec path: read tasks.md from that spec directory and summarize the tasks.\n   - If plain description: ask the user if they want to create a spec first or go straight to execution.\n\n3. Confirm the user is on the correct feature branch.\n\n4. Once scope is confirmed, tell the user to swap to team-lead:\n   `/agent swap` → select `team-lead`\n\n   Then provide the exact prompt to paste for team-lead, e.g.:\n   \"Execute the spec in .kiro/specs/<name>/\"\n\n5. If the user is already on team-lead agent, skip step 4 and begin orchestration directly."
+  },
+  "shortName": "agentic-team"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "reviewer",
+  "description": "Code review agent that analyzes changes against main, validates style guide compliance, and reports findings.",
+  "prompt": "file://./reviewer-prompt.md",
+  "tools": ["read", "shell"],
+  "allowedTools": ["read", "shell"],
+  "toolsSettings": {
+    "shell": {
+      "autoAllowReadonly": true
+    }
+  },
+  "welcomeMessage": "Reviewer ready. What should I review?"
+}
