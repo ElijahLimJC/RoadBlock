@@ -13,6 +13,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import streamlit as st
 
 from components.email_ingestion import EmailIngestionModule
