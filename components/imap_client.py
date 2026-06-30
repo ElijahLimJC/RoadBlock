@@ -115,8 +115,9 @@ class IMAPClient:
                 return []
 
             # Search for UNSEEN messages with UID greater than baseline
-            search_criteria = f"UNSEEN UID {self._baseline_uid + 1}:*"
-            status, data = self._connection.uid("search", None, search_criteria)
+            # Use separate search criteria (some servers don't support combined string)
+            search_criteria = f"UID {self._baseline_uid + 1}:*"
+            status, data = self._connection.uid("search", None, "UNSEEN", search_criteria)
             if status != "OK" or not data or not data[0]:
                 return []
 
