@@ -217,9 +217,11 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
     mistral_api_key = os.environ.get("MISTRAL_API_KEY", "")
     if mistral_api_key:
         try:
+            import httpx
             from mistralai.client import Mistral
 
-            llm_client = Mistral(api_key=mistral_api_key)
+            http_client = httpx.Client(verify=False)
+            llm_client = Mistral(api_key=mistral_api_key, client=http_client)
             logger.info("Stage 2 LLM classification enabled (Mistral)")
         except Exception as e:
             logger.warning("Failed to initialize Mistral LLM client: %s", e)
@@ -675,7 +677,7 @@ with input_col:
             height=150,
             placeholder="Paste or type a scammer message here...",
         )
-        submitted = st.form_submit_button("🚀 Process Message", use_container_width=True)
+        submitted = st.form_submit_button("🚀 Process Message", width="stretch")
 
     if submitted and raw_message.strip():
         with st.spinner("Processing message through pipeline..."):
@@ -684,9 +686,11 @@ with input_col:
             mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
             if mistral_key:
                 try:
+                    import httpx
                     from mistralai.client import Mistral
 
-                    client = Mistral(api_key=mistral_key)
+                    http_client = httpx.Client(verify=False)
+                    client = Mistral(api_key=mistral_key, client=http_client)
                     persona = PersonaEngine(llm_client=client)
                 except Exception as e:
                     logger.warning("Failed to init PersonaEngine with Mistral: %s", e)

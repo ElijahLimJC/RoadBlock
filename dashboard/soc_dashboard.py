@@ -297,7 +297,7 @@ class SOCDashboard:
                 "Stage": stage,
             })
 
-        st.dataframe(rows, use_container_width=True)
+        st.dataframe(rows, width="stretch")
 
     def render_notification_log(
         self, notifications: list[dict[str, Any] | Any]
