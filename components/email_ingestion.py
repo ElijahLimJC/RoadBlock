@@ -585,7 +585,31 @@ class EmailIngestionModule:
                 body=response_content,
                 in_reply_to=email_msg.message_id,
             )
-            self._enqueue_result("outbound", outbound.model_dump())
+
+            # Send immediately in background thread
+            try:
+                send_success = self._smtp_client.send_reply(
+                    to_address=outbound.to_address,
+                    subject=outbound.subject,
+                    body=outbound.body,
+                    in_reply_to=outbound.in_reply_to or None,
+                )
+                if send_success:
+                    self._outbound_sent += 1
+                    logger.info(
+                        "[PIPELINE] Step 6: Email SENT to %s",
+                        outbound.to_address,
+                    )
+                else:
+                    logger.warning(
+                        "[PIPELINE] Step 6: SMTP send failed, queuing for retry"
+                    )
+                    self._enqueue_result("outbound", outbound.model_dump())
+            except Exception as e:
+                logger.warning(
+                    "[PIPELINE] Step 6: SMTP exception: %s, queuing for retry", e
+                )
+                self._enqueue_result("outbound", outbound.model_dump())
 
             # Step 7: Extract IoCs via Threat Parser (best-effort)
             logger.info("[PIPELINE] Step 7: Running IoC extraction...")
@@ -629,14 +653,30 @@ class EmailIngestionModule:
             email_msg: The blocked email message.
         """
         try:
-            # Store default response as outbound
+            # Send default response directly via SMTP
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
                 subject=self._smtp_client.compose_reply_subject(email_msg.subject),
                 body=_DEFAULT_BLOCKED_RESPONSE,
                 in_reply_to=email_msg.message_id,
             )
-            self._enqueue_result("outbound", outbound.model_dump())
+            try:
+                send_success = self._smtp_client.send_reply(
+                    to_address=outbound.to_address,
+                    subject=outbound.subject,
+                    body=outbound.body,
+                    in_reply_to=outbound.in_reply_to or None,
+                )
+                if send_success:
+                    self._outbound_sent += 1
+                    logger.info(
+                        "[BLOCKED] Email SENT to %s", outbound.to_address
+                    )
+                else:
+                    self._enqueue_result("outbound", outbound.model_dump())
+            except Exception as e:
+                logger.warning("[BLOCKED] SMTP send failed: %s", e)
+                self._enqueue_result("outbound", outbound.model_dump())
 
             # Add default persona response to thread history
             if email_msg.sender in self._threads:

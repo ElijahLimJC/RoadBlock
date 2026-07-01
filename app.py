@@ -785,3 +785,11 @@ with dashboard_col:
         _dashboard.render_classification_log(
             st.session_state.email_ingestion.get("classification_log", [])
         )
+
+# --- Auto-refresh when email ingestion is active ---
+# Triggers st.rerun() every 5 seconds (preserves session state) so background
+# pipeline results appear on the dashboard without user interaction.
+if st.session_state.get("email_ingestion_module") is not None:
+    from streamlit_autorefresh import st_autorefresh
+
+    st_autorefresh(interval=5000, limit=None, key="email_ingestion_refresh")
