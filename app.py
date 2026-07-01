@@ -590,6 +590,25 @@ if "email_ingestion_module" not in st.session_state:
 if st.session_state.get("email_ingestion_module") is not None:
     _email_module = st.session_state.email_ingestion_module
     _email_module.flush_to_session_state(st.session_state.email_ingestion)
+
+    # Merge staged IoCs from email ingestion into top-level iocs state
+    _staged_iocs = st.session_state.email_ingestion.pop("_staged_iocs", [])
+    if _staged_iocs:
+        _iocs_state = st.session_state.get("iocs", {})
+        for _ioc_data in _staged_iocs:
+            _cat = _ioc_data.get("category", "")
+            if _cat == "cryptocurrency_wallet":
+                _iocs_state.setdefault("cryptocurrency_wallets", []).append(_ioc_data)
+            elif _cat == "phishing_domain":
+                _iocs_state.setdefault("phishing_domains", []).append(_ioc_data)
+            elif _cat == "phone_number":
+                _iocs_state.setdefault("phone_numbers", []).append(_ioc_data)
+            elif _cat == "mule_bank_account":
+                _iocs_state.setdefault("mule_bank_accounts", []).append(_ioc_data)
+        st.session_state["iocs"] = _iocs_state
+        st.session_state["new_ioc_count"] = (
+            st.session_state.get("new_ioc_count", 0) + len(_staged_iocs)
+        )
     # Use module's internal state for connection status (avoid NOOP race with bg thread)
     if _email_module._polling and _email_module._consecutive_failures == 0:
         st.session_state.email_ingestion["connection_status"] = "connected"

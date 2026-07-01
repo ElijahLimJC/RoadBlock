@@ -187,6 +187,13 @@ class EmailIngestionModule:
                 threads[sender] = result["data"]
                 state_dict["threads"] = threads
 
+            elif result_type == "iocs":
+                # Stage extracted IoCs for merging into top-level state
+                staged = state_dict.get("_staged_iocs", [])
+                ioc_list = result.get("data", [])
+                staged.extend(ioc_list)
+                state_dict["_staged_iocs"] = staged
+
             elif result_type == "counters":
                 state_dict["connection_status"] = result.get(
                     "connection_status", state_dict.get("connection_status", "disconnected")
@@ -517,6 +524,11 @@ class EmailIngestionModule:
                         len(extraction_result.iocs),
                         email_msg.sender,
                     )
+                    # Enqueue IoCs for session state sync
+                    ioc_data_list = [
+                        ioc.model_dump() for ioc in extraction_result.iocs
+                    ]
+                    self._enqueue_result("iocs", ioc_data_list)
             except Exception as e:
                 logger.warning(
                     "IoC extraction failed for email from %s: %s",
@@ -580,6 +592,11 @@ class EmailIngestionModule:
                     len(extraction_result.iocs),
                     email_msg.sender,
                 )
+                # Enqueue IoCs for session state sync
+                ioc_data_list = [
+                    ioc.model_dump() for ioc in extraction_result.iocs
+                ]
+                self._enqueue_result("iocs", ioc_data_list)
 
             # Update thread even for blocked messages
             self._update_thread(email_msg)
