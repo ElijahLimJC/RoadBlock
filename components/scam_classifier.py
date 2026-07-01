@@ -234,6 +234,12 @@ class ScamClassifier:
         # Collect matched pattern names for the result
         matched = self._get_matched_patterns(subject, body)
 
+        if self._llm_client is None:
+            logger.warning("Stage 2 LLM client is None, falling back to Stage 1")
+            return self._fallback_result(
+                stage_1_confidence, matched, subject
+            )
+
         try:
             response = self._llm_client.chat.complete(
                 model="mistral-small-latest",
