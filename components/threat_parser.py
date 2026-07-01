@@ -560,7 +560,8 @@ class ThreatParser:
         """Extract bare domains (e.g., evil.com) from text.
 
         Only includes domains whose TLD is in the known common TLDs set
-        to avoid false positives.
+        to avoid false positives. Skips domains that are part of email
+        addresses (preceded by @).
 
         Args:
             text: Raw message text.
@@ -569,6 +570,10 @@ class ThreatParser:
         try:
             for match in self._bare_domain_pattern.finditer(text):
                 original_form = match.group(1)
+                # Skip domains that are part of email addresses
+                match_start = match.start()
+                if match_start > 0 and text[match_start - 1] == "@":
+                    continue
                 # Check if TLD is in our known list to reduce false positives
                 parts = original_form.split(".")
                 tld = parts[-1].lower()
