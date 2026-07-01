@@ -568,6 +568,8 @@ class PersonaEngine:
         """Execute the actual Gemini generate_content call.
 
         Separated into its own method to run inside the thread pool executor.
+        Supports both the old google-generativeai SDK (GenerativeModel) and
+        the new google-genai SDK (Client).
 
         Args:
             prompt: The full prompt string.
@@ -576,6 +578,17 @@ class PersonaEngine:
             The response text or None if extraction failed.
         """
         try:
+            # New google-genai SDK: client.models.generate_content()
+            if hasattr(self.llm_client, "models"):
+                response = self.llm_client.models.generate_content(
+                    model="gemini-2.5-flash",
+                    contents=prompt,
+                )
+                if response and hasattr(response, "text"):
+                    return response.text
+                return None
+
+            # Old google-generativeai SDK: model.generate_content()
             response = self.llm_client.generate_content(prompt)
 
             # Extract text from Gemini response

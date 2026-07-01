@@ -218,10 +218,10 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
     gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
     if gemini_api_key:
         try:
-            import google.generativeai as genai
+            from google import genai
 
-            genai.configure(api_key=gemini_api_key)
-            llm_client = genai.GenerativeModel("gemini-2.5-flash-lite")
+            client = genai.Client(api_key=gemini_api_key)
+            llm_client = client
             logger.info("Stage 2 LLM classification enabled (Gemini)")
         except Exception as e:
             logger.warning("Failed to initialize Gemini LLM client: %s", e)
@@ -682,11 +682,10 @@ with input_col:
             gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
             if gemini_key:
                 try:
-                    import google.generativeai as genai
+                    from google import genai
 
-                    genai.configure(api_key=gemini_key)
-                    llm_client = genai.GenerativeModel("gemini-2.5-flash")
-                    persona = PersonaEngine(llm_client=llm_client)
+                    client = genai.Client(api_key=gemini_key)
+                    persona = PersonaEngine(llm_client=client)
                 except Exception as e:
                     logger.warning("Failed to init PersonaEngine with Gemini: %s", e)
             if persona is None:
