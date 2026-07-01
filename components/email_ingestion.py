@@ -461,9 +461,10 @@ class EmailIngestionModule:
         Steps:
         1. Run Safety Filter scan on email body
         2. If blocked (>=80% injection tokens): call _handle_blocked_message
-        3. Otherwise: generate persona response and extract IoCs
-        4. Update/create conversation thread for sender (Task 8.3)
-        5. Store results in pending buffer
+        3. Generate persona response with thread context
+        4. Queue outbound response immediately after generation
+        5. Extract IoCs via Threat Parser (best-effort, isolated)
+        6. Update thread (best-effort, isolated)
 
         Args:
             email_msg: The confirmed scam email.
@@ -494,16 +495,7 @@ class EmailIngestionModule:
                     {"sender": "persona", "content": response_content}
                 )
 
-            # Step 4: Extract IoCs via Threat Parser
-            threat_parser = ThreatParser()
-            extraction_result = self._run_extraction(
-                threat_parser, email_msg.body
-            )
-
-            # Step 5: Update thread (Task 8.3)
-            self._update_thread(email_msg)
-
-            # Step 6: Queue outbound response
+            # Step 4: Queue outbound response immediately after generation
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
                 subject=self._smtp_client.compose_reply_subject(email_msg.subject),
@@ -512,11 +504,34 @@ class EmailIngestionModule:
             )
             self._enqueue_result("outbound", outbound.model_dump())
 
-            if extraction_result and extraction_result.iocs:
-                logger.info(
-                    "Extracted %d IoCs from scam email (sender=%s)",
-                    len(extraction_result.iocs),
+            # Step 5: Extract IoCs via Threat Parser (best-effort)
+            try:
+                threat_parser = ThreatParser()
+                extraction_result = self._run_extraction(
+                    threat_parser, email_msg.body
+                )
+
+                if extraction_result and extraction_result.iocs:
+                    logger.info(
+                        "Extracted %d IoCs from scam email (sender=%s)",
+                        len(extraction_result.iocs),
+                        email_msg.sender,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "IoC extraction failed for email from %s: %s",
                     email_msg.sender,
+                    e,
+                )
+
+            # Step 6: Update thread (best-effort)
+            try:
+                self._update_thread(email_msg)
+            except Exception as e:
+                logger.warning(
+                    "Thread update failed for email from %s: %s",
+                    email_msg.sender,
+                    e,
                 )
 
         except Exception as e:
