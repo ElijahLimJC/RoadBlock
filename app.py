@@ -16,6 +16,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Configure logging so pipeline debug messages appear in terminal
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 import streamlit as st
 
 from components.email_ingestion import EmailIngestionModule

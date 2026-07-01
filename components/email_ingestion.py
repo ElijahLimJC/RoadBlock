@@ -376,28 +376,39 @@ class EmailIngestionModule:
         flag after 3.
         """
         idle_supported = True  # Optimistic; will flip to False on failure
+        logger.info("[POLL] Poll loop started, interval=%ds", self.polling_interval)
 
         while self._polling:
             try:
                 # Ensure connection
                 if not self._imap_client.is_connected:
-                    logger.info("IMAP not connected, attempting reconnect")
+                    logger.info("[POLL] IMAP not connected, attempting reconnect")
                     self._imap_client.connect()
                     if not self._imap_client.is_connected:
                         raise ConnectionError("IMAP reconnection failed")
 
+                logger.info("[POLL] Fetching unread emails...")
                 raw_emails = self._imap_client.fetch_unread()
+                logger.info("[POLL] Fetched %d email(s)", len(raw_emails))
 
                 for uid, raw_bytes in raw_emails:
+                    logger.info("[POLL] Processing UID %s (%d bytes)", uid, len(raw_bytes))
                     email_msg = self._parse_email(raw_bytes)
                     if email_msg is not None:
                         self._total_fetched += 1
+                        logger.info(
+                            "[POLL] Parsed email from=%s subject='%s'",
+                            email_msg.sender,
+                            email_msg.subject[:50],
+                        )
                         self.process_email(email_msg)
+                    else:
+                        logger.warning("[POLL] Failed to parse UID %s", uid)
                     # Mark as read regardless
                     mark_ok = self._imap_client.mark_as_read(uid)
                     if not mark_ok:
                         logger.warning(
-                            "Failed to mark UID %s as read; will re-fetch next cycle",
+                            "[POLL] Failed to mark UID %s as read",
                             uid,
                         )
 
@@ -409,7 +420,7 @@ class EmailIngestionModule:
             except Exception as e:
                 self._consecutive_failures += 1
                 logger.warning(
-                    "Poll cycle failed (consecutive failures: %d): %s",
+                    "[POLL] Cycle failed (consecutive failures: %d): %s",
                     self._consecutive_failures,
                     e,
                 )
@@ -417,7 +428,7 @@ class EmailIngestionModule:
                 if self._consecutive_failures >= _DEGRADED_FAILURE_THRESHOLD:
                     self.degraded = True
                     logger.warning(
-                        "Email ingestion degraded: %d consecutive failures",
+                        "[POLL] Degraded: %d consecutive failures",
                         self._consecutive_failures,
                     )
 
@@ -426,9 +437,12 @@ class EmailIngestionModule:
 
             # Wait for next cycle: prefer IDLE, fall back to timed sleep
             if idle_supported and self._imap_client.is_connected:
+                logger.debug("[POLL] Entering IDLE wait (%ds timeout)...", self.polling_interval)
                 new_mail = self._imap_client.idle_wait(
                     timeout=float(self.polling_interval)
                 )
+                if new_mail:
+                    logger.info("[POLL] IDLE: new mail notification received")
                 if not new_mail and not self._polling:
                     break
                 # If idle_wait returned False due to unsupported IDLE,
@@ -507,28 +521,42 @@ class EmailIngestionModule:
 
         try:
             # Step 1: Safety Filter scan
+            logger.info(
+                "[PIPELINE] Step 1: Running safety filter on email from %s",
+                email_msg.sender,
+            )
             safety_filter = SafetyFilter()
             scan_result = safety_filter.scan(email_msg.body)
+            logger.info(
+                "[PIPELINE] Step 1 done: blocked=%s, patterns=%d",
+                scan_result.is_blocked,
+                len(scan_result.detected_patterns),
+            )
 
             # Step 2: Branch on blocked status
             if scan_result.is_blocked:
+                logger.info("[PIPELINE] Step 2: Message blocked, routing to blocked handler")
                 self._handle_blocked_message(email_msg)
                 return
 
             # Step 3: Update thread FIRST so it exists for persona append
+            logger.info("[PIPELINE] Step 3: Updating thread for %s", email_msg.sender)
             try:
                 self._update_thread(email_msg)
             except Exception as e:
                 logger.warning(
-                    "Thread update failed for email from %s: %s",
-                    email_msg.sender,
-                    e,
+                    "[PIPELINE] Step 3 failed: %s", e,
                 )
 
             # Step 4: Generate persona response with thread context
+            logger.info("[PIPELINE] Step 4: Generating persona response...")
             thread_history = self._get_thread_history(email_msg.sender)
             response_content = self._generate_persona_response(
                 scan_result.sanitized_content, thread_history
+            )
+            logger.info(
+                "[PIPELINE] Step 4 done: response length=%d chars",
+                len(response_content),
             )
 
             # Add persona response to thread history
@@ -538,6 +566,7 @@ class EmailIngestionModule:
                 )
 
             # Step 5: Enqueue conversation messages for dashboard display
+            logger.info("[PIPELINE] Step 5: Enqueuing conversation messages")
             self._enqueue_result("conversation_message", {
                 "sender": "scammer",
                 "content": scan_result.sanitized_content,
@@ -548,6 +577,8 @@ class EmailIngestionModule:
             })
 
             # Step 6: Queue outbound response immediately after generation
+            logger.info("[PIPELINE] Step 6: Queuing outbound email to %s",
+                        email_msg.reply_to or email_msg.sender)
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
                 subject=self._smtp_client.compose_reply_subject(email_msg.subject),
@@ -557,6 +588,7 @@ class EmailIngestionModule:
             self._enqueue_result("outbound", outbound.model_dump())
 
             # Step 7: Extract IoCs via Threat Parser (best-effort)
+            logger.info("[PIPELINE] Step 7: Running IoC extraction...")
             try:
                 extraction_result = self._run_extraction(
                     self._threat_parser, email_msg.body
@@ -564,15 +596,15 @@ class EmailIngestionModule:
 
                 if extraction_result and extraction_result.iocs:
                     logger.info(
-                        "Extracted %d IoCs from scam email (sender=%s)",
+                        "[PIPELINE] Step 7 done: extracted %d IoCs",
                         len(extraction_result.iocs),
-                        email_msg.sender,
                     )
-                    # Enqueue IoCs for session state sync
                     ioc_data_list = [
                         ioc.model_dump() for ioc in extraction_result.iocs
                     ]
                     self._enqueue_result("iocs", ioc_data_list)
+                else:
+                    logger.info("[PIPELINE] Step 7 done: no IoCs found")
             except Exception as e:
                 logger.warning(
                     "IoC extraction failed for email from %s: %s",
