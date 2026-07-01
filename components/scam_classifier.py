@@ -11,7 +11,7 @@ scam emails into the Safety_Filter -> Persona_Engine engagement loop.
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from models.email_models import ClassificationResult, EmailMessage, ScamPattern
@@ -234,11 +234,23 @@ class ScamClassifier:
         # Collect matched pattern names for the result
         matched = self._get_matched_patterns(subject, body)
 
-        try:
-            response = self._llm_client.generate_content(
-                prompt, request_options={"timeout": self.llm_timeout}
+        if self._llm_client is None:
+            logger.warning("Stage 2 LLM client is None, falling back to Stage 1")
+            return self._fallback_result(
+                stage_1_confidence, matched, subject
             )
-            response_text = response.text if response and response.text else ""
+
+        try:
+            response = self._llm_client.chat.complete(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            response_text = (
+                response.choices[0].message.content
+                if response and response.choices
+                else ""
+            )
         except Exception as e:
             logger.warning("Stage 2 LLM call failed: %s", e)
             return self._fallback_result(
@@ -276,7 +288,7 @@ class ScamClassifier:
             determining_stage="stage_2",
             matched_patterns=matched,
             llm_reasoning=validated["reasoning"],
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             subject=subject,
         )
 
@@ -329,7 +341,7 @@ class ScamClassifier:
             confidence=stage_1_confidence,
             determining_stage="stage_1",
             matched_patterns=matched_patterns,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             subject=subject,
         )
 
@@ -355,7 +367,7 @@ class ScamClassifier:
                 confidence=confidence,
                 determining_stage="stage_1",
                 matched_patterns=matched,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 sender=email.sender,
                 subject=email.subject,
             )

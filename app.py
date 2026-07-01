@@ -9,9 +9,19 @@ import asyncio
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Configure logging so pipeline debug messages appear in terminal
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 import streamlit as st
 
@@ -30,11 +40,8 @@ from models.email_models import ScamPattern
 
 logger = logging.getLogger(__name__)
 
-# --- Pipeline timeout (seconds), excluding async parser ---
+# --- Pipeline timeout (seconds), excluding parser stage ---
 _PIPELINE_TIMEOUT_SECONDS = 15.0
-
-# --- Thread pool for async threat parsing ---
-_extraction_executor = ThreadPoolExecutor(max_workers=2)
 
 
 class PipelineError(Exception):
@@ -74,6 +81,9 @@ def initialize_chat_state() -> None:
     for key, default in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default
+
+    if "threat_parser_instance" not in st.session_state:
+        st.session_state["threat_parser_instance"] = ThreatParser()
 
     # Email ingestion state (Task 9.1)
     if "email_ingestion" not in st.session_state:
@@ -176,7 +186,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         return module
 
     required_vars = ["IMAP_HOST", "IMAP_PORT", "IMAP_USERNAME", "IMAP_PASSWORD"]
-    missing = [v for v in required_vars if not os.environ.get(v)]
+    missing = [v for v in required_vars if not os.environ.get(v, "").strip()]
     if missing:
         logger.info(
             "Email ingestion disabled: missing env vars %s", ", ".join(missing)
@@ -184,17 +194,17 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         return None
 
     imap_client = IMAPClient(
-        host=os.environ["IMAP_HOST"],
-        port=int(os.environ.get("IMAP_PORT", "993")),
-        username=os.environ.get("IMAP_USERNAME", ""),
-        password=os.environ.get("IMAP_PASSWORD", ""),
+        host=os.environ["IMAP_HOST"].strip(),
+        port=int(os.environ.get("IMAP_PORT", "993").strip()),
+        username=os.environ.get("IMAP_USERNAME", "").strip(),
+        password=os.environ.get("IMAP_PASSWORD", "").strip(),
     )
 
-    smtp_host = os.environ.get("SMTP_HOST", "")
-    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-    smtp_username = os.environ.get("SMTP_USERNAME", "")
-    smtp_password = os.environ.get("SMTP_PASSWORD", "")
-    smtp_sender = os.environ.get("SMTP_SENDER", "")
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587").strip())
+    smtp_username = os.environ.get("SMTP_USERNAME", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    smtp_sender = os.environ.get("SMTP_SENDER", "").strip()
 
     if not smtp_host:
         logger.info("SMTP not configured; outbound replies will be disabled")
@@ -208,9 +218,29 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
     )
 
     patterns = _get_default_scam_patterns()
+
+    # Initialize LLM client for Stage 2 classification if API key available
+    llm_client = None
+    mistral_api_key = os.environ.get("MISTRAL_API_KEY", "")
+    if mistral_api_key:
+        try:
+            import httpx
+            from mistralai.client import Mistral
+
+            http_client = httpx.Client(verify=False)
+            llm_client = Mistral(api_key=mistral_api_key, client=http_client)
+            logger.info("Stage 2 LLM classification enabled (Mistral)")
+        except Exception as e:
+            logger.warning("Failed to initialize Mistral LLM client: %s", e)
+    else:
+        logger.info(
+            "MISTRAL_API_KEY not set; Stage 2 LLM disabled, "
+            "falling back to regex-only classification"
+        )
+
     scam_classifier = ScamClassifier(
         patterns=patterns,
-        llm_client=None,
+        llm_client=llm_client,
         confidence_threshold=0.7,
         fallback_threshold=0.3,
     )
@@ -219,7 +249,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         imap_client=imap_client,
         smtp_client=smtp_client,
         scam_classifier=scam_classifier,
-        polling_interval=30,
+        polling_interval=5,
     )
 
     st.session_state.email_ingestion_module = module
@@ -234,10 +264,10 @@ def _get_default_blocked_response() -> str:
     so the Persona Engine is not invoked.
     """
     return (
-        "Oh dear, I'm sorry, I don't quite understand what you're saying. "
-        "Could you try saying that again in simpler words? My grandson Tommy "
-        "says I need to be more careful about what I read on the computer. "
-        "Anyway, what was it you needed help with?"
+        "Aiyoh sorry ah, I don't understand what you typing leh. Can you say "
+        "again in simpler words? My grandson Jia Wei always tell me, 'Ah Ma, "
+        "don't anyhow read things on the phone, later kena scam.' Anyway, "
+        "what was it you want to ask me ah?"
     )
 
 
@@ -257,20 +287,20 @@ def process_scammer_message(
     2. Branch: blocked → default response; safe/partial → Persona_Engine
     3. Update Chat_State with message pair
     4. Stalling_Tracker.record_turn()
-    5. Trigger async Threat_Parser extraction via ThreadPoolExecutor
+    5. Threat_Parser extraction (direct call, synchronous)
     6. On extraction complete: MCP lookup → notifications for NEW IoCs → update state
 
     Error handling wraps each stage in try/except, logs PipelineError,
     and preserves Chat_State on failure.
 
-    Enforces 15s end-to-end timeout (excluding async parser).
+    Enforces 15s end-to-end timeout (excluding parser stage).
 
     Args:
         raw_message: The raw scammer input text.
         safety_filter: SafetyFilter instance (created if None).
         persona_engine: PersonaEngine instance (created if None).
         stalling_tracker: StallingTracker instance (created if None).
-        threat_parser: ThreatParser instance (created if None).
+        threat_parser: ThreatParser instance (uses session singleton if None).
         mcp_client: IoCLookupMCPClient instance (optional, skips MCP if None).
         notification_module: NotificationModule instance (created if None).
     """
@@ -282,7 +312,9 @@ def process_scammer_message(
     if stalling_tracker is None:
         stalling_tracker = StallingTracker()
     if threat_parser is None:
-        threat_parser = ThreatParser()
+        threat_parser = st.session_state.get(
+            "threat_parser_instance", ThreatParser()
+        )
     if notification_module is None:
         notification_module = NotificationModule()
 
@@ -379,32 +411,20 @@ def process_scammer_message(
         )
         return
 
-    # --- Stage 5: Trigger async Threat_Parser extraction ---
-    # Use the original raw message for extraction (captures IoCs even in blocked messages)
+    # --- Stage 5: Threat_Parser extraction + MCP lookup ---
     message_for_extraction = raw_message
 
     try:
         st.session_state["parser_status"] = "running"
-        # Submit extraction to thread pool (non-blocking for Streamlit)
-        future = _extraction_executor.submit(
-            _run_extraction_pipeline,
+        _run_extraction_pipeline(
             message_for_extraction,
             threat_parser,
             mcp_client,
             notification_module,
+            st.session_state,
         )
-        # Wait for extraction to complete (with remaining time budget)
-        # The async parser has its own 5s internal timeout
-        # We give it up to 10s from the thread pool perspective
-        remaining_time = max(1.0, 10.0)
-        try:
-            future.result(timeout=remaining_time)
-        except Exception as e:
-            logger.warning("Async extraction did not complete in time: %s", e)
-            st.session_state["parser_status"] = "error"
-            st.session_state["last_error"] = f"Extraction timeout: {e}"
     except Exception as e:
-        error = PipelineError("Threat_Parser", f"Extraction dispatch failed: {e}", e)
+        error = PipelineError("Threat_Parser", f"Extraction failed: {e}", e)
         logger.error(str(error), exc_info=True)
         st.session_state["parser_status"] = "error"
         st.session_state["last_error"] = str(error)
@@ -415,8 +435,9 @@ def _run_extraction_pipeline(
     threat_parser: ThreatParser,
     mcp_client: Optional[IoCLookupMCPClient],
     notification_module: NotificationModule,
+    state: Any = None,
 ) -> None:
-    """Run the extraction pipeline in a background thread.
+    """Run the extraction pipeline.
 
     Executes:
     1. ThreatParser.extract_iocs(message)
@@ -429,28 +450,30 @@ def _run_extraction_pipeline(
         threat_parser: ThreatParser instance.
         mcp_client: Optional MCP client for IoC lookups.
         notification_module: NotificationModule for generating alerts.
+        state: Session state reference.
     """
-    try:
-        # Run async extraction in a new event loop (since we're in a thread)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+    # Use passed state reference (background thread can't access st.session_state)
+    if state is None:
         try:
-            extraction_result = loop.run_until_complete(
-                threat_parser.extract_iocs(message)
-            )
-        finally:
-            loop.close()
+            state = st.session_state
+        except Exception:
+            logger.warning("No session state available in background thread")
+            return
+
+    try:
+        # extract_iocs is now synchronous — call directly
+        extraction_result = threat_parser.extract_iocs(message)
 
         # Update rejection log
         if extraction_result.rejections:
-            st.session_state["rejection_log"].extend(extraction_result.rejections)
+            state["rejection_log"].extend(extraction_result.rejections)
 
         if not extraction_result.iocs:
-            st.session_state["parser_status"] = "idle"
+            state["parser_status"] = "idle"
             return
 
         # --- MCP Lookup for each IoC ---
-        cache = st.session_state.get("mcp_lookup_cache", {})
+        cache = state.get("mcp_lookup_cache", {})
         lookup_results = []
 
         if mcp_client is not None:
@@ -463,11 +486,11 @@ def _run_extraction_pipeline(
                     )
                 finally:
                     loop.close()
-                st.session_state["mcp_lookup_cache"] = cache
-                st.session_state["mcp_server_status"] = "connected"
+                state["mcp_lookup_cache"] = cache
+                state["mcp_server_status"] = "connected"
             except Exception as e:
                 logger.warning("MCP batch lookup failed: %s", e)
-                st.session_state["mcp_server_status"] = "disconnected"
+                state["mcp_server_status"] = "disconnected"
                 # Continue without lookup results — IoCs still stored
 
         # --- Store IoCs and generate notifications for NEW ones ---
@@ -477,27 +500,27 @@ def _run_extraction_pipeline(
             if i < len(lookup_results):
                 is_known = lookup_results[i].is_known
                 if is_known:
-                    st.session_state["known_ioc_count"] = (
-                        st.session_state.get("known_ioc_count", 0) + 1
+                    state["known_ioc_count"] = (
+                        state.get("known_ioc_count", 0) + 1
                     )
                 else:
-                    st.session_state["new_ioc_count"] = (
-                        st.session_state.get("new_ioc_count", 0) + 1
+                    state["new_ioc_count"] = (
+                        state.get("new_ioc_count", 0) + 1
                     )
             else:
                 # No lookup result — treat as new
-                st.session_state["new_ioc_count"] = (
-                    st.session_state.get("new_ioc_count", 0) + 1
+                state["new_ioc_count"] = (
+                    state.get("new_ioc_count", 0) + 1
                 )
 
             # Store IoC in appropriate category list
-            _store_ioc(ioc)
+            _store_ioc(ioc, state)
 
             # Generate notification only for NEW IoCs (not previously known)
             if not is_known:
                 try:
                     notification = notification_module.generate_notification(ioc)
-                    st.session_state["notifications"].append(notification)
+                    state["notifications"].append(notification)
                 except Exception as e:
                     logger.warning(
                         "Notification generation failed for IoC %s: %s",
@@ -505,25 +528,29 @@ def _run_extraction_pipeline(
                         e,
                     )
 
-        st.session_state["parser_status"] = "idle"
+        state["parser_status"] = "idle"
 
     except Exception as e:
         logger.error("Extraction pipeline failed: %s", e, exc_info=True)
-        st.session_state["parser_status"] = "error"
-        st.session_state["last_error"] = f"Extraction error: {e}"
+        state["parser_status"] = "error"
+        state["last_error"] = f"Extraction error: {e}"
 
 
-def _store_ioc(ioc) -> None:
+def _store_ioc(ioc, state=None) -> None:
     """Store an extracted IoC in the appropriate session state category list.
 
     Args:
         ioc: A BaseIoC subclass instance to store.
+        state: Session state reference (uses st.session_state if None).
     """
     from models.ioc_models import (
         IoCCategory,
     )
 
-    iocs = st.session_state.get("iocs", {})
+    if state is None:
+        state = st.session_state
+
+    iocs = state.get("iocs", {})
 
     if ioc.category == IoCCategory.CRYPTOCURRENCY_WALLET:
         iocs.setdefault("cryptocurrency_wallets", []).append(ioc)
@@ -534,7 +561,7 @@ def _store_ioc(ioc) -> None:
     elif ioc.category == IoCCategory.MULE_BANK_ACCOUNT:
         iocs.setdefault("mule_bank_accounts", []).append(ioc)
 
-    st.session_state["iocs"] = iocs
+    state["iocs"] = iocs
 
 
 # ---------------------------------------------------------------------------
@@ -555,6 +582,75 @@ if "email_ingestion_module" not in st.session_state:
 if st.session_state.get("email_ingestion_module") is not None:
     _email_module = st.session_state.email_ingestion_module
     _email_module.flush_to_session_state(st.session_state.email_ingestion)
+
+    # Merge staged IoCs from email ingestion into top-level iocs state
+    _staged_iocs = st.session_state.email_ingestion.pop("_staged_iocs", [])
+    if _staged_iocs:
+        _iocs_state = st.session_state.get("iocs", {})
+        for _ioc_data in _staged_iocs:
+            _cat = _ioc_data.get("category", "")
+            if _cat == "cryptocurrency_wallet":
+                _iocs_state.setdefault("cryptocurrency_wallets", []).append(_ioc_data)
+            elif _cat == "phishing_domain":
+                _iocs_state.setdefault("phishing_domains", []).append(_ioc_data)
+            elif _cat == "phone_number":
+                _iocs_state.setdefault("phone_numbers", []).append(_ioc_data)
+            elif _cat == "mule_bank_account":
+                _iocs_state.setdefault("mule_bank_accounts", []).append(_ioc_data)
+        st.session_state["iocs"] = _iocs_state
+        st.session_state["new_ioc_count"] = (
+            st.session_state.get("new_ioc_count", 0) + len(_staged_iocs)
+        )
+
+    # Merge staged conversation messages into top-level conversation_history
+    _staged_msgs = st.session_state.email_ingestion.pop("_staged_messages", [])
+    if _staged_msgs:
+        from datetime import datetime
+        for _msg_data in _staged_msgs:
+            _chat_msg = ChatMessage(
+                sender=_msg_data.get("sender", "scammer"),
+                content=_msg_data.get("content", ""),
+                timestamp=datetime.utcnow(),
+            )
+            st.session_state["conversation_history"].append(_chat_msg)
+
+    # Use module's internal state for connection status (avoid NOOP race with bg thread)
+    if _email_module._polling and _email_module._consecutive_failures == 0:
+        st.session_state.email_ingestion["connection_status"] = "connected"
+    elif _email_module._consecutive_failures >= 3:
+        st.session_state.email_ingestion["connection_status"] = "disconnected"
+
+    # Send any pending outbound emails via SMTP
+    _outbound_queue = st.session_state.email_ingestion.get("outbound_queue", [])
+    _sent_indices = []
+    for _idx, _outbound in enumerate(_outbound_queue):
+        if isinstance(_outbound, dict) and _outbound.get("status") in ("pending", "pending_retry"):
+            _success = _email_module._smtp_client.send_reply(
+                to_address=_outbound.get("to_address", ""),
+                subject=_outbound.get("subject", ""),
+                body=_outbound.get("body", ""),
+                in_reply_to=_outbound.get("in_reply_to") or None,
+                references=_outbound.get("references") or None,
+            )
+            if _success:
+                _outbound["status"] = "sent"
+                st.session_state.email_ingestion["outbound_sent"] = (
+                    st.session_state.email_ingestion.get("outbound_sent", 0) + 1
+                )
+                _sent_indices.append(_idx)
+            else:
+                _outbound["retry_count"] = _outbound.get("retry_count", 0) + 1
+                if _outbound["retry_count"] >= 3:
+                    _outbound["status"] = "failed_permanent"
+                    _sent_indices.append(_idx)
+                else:
+                    _outbound["status"] = "pending_retry"
+
+    # Remove sent/failed messages from queue
+    for _idx in sorted(_sent_indices, reverse=True):
+        _outbound_queue.pop(_idx)
+    st.session_state.email_ingestion["outbound_queue"] = _outbound_queue
+
     _email_module._smtp_client.process_retry_queue()
 
 # --- Import SOC Dashboard ---
@@ -601,17 +697,26 @@ with input_col:
             height=150,
             placeholder="Paste or type a scammer message here...",
         )
-        submitted = st.form_submit_button("🚀 Process Message", use_container_width=True)
+        submitted = st.form_submit_button("🚀 Process Message", width="stretch")
 
     if submitted and raw_message.strip():
         with st.spinner("Processing message through pipeline..."):
-            # Attempt to create a PersonaEngine if API key is available
+            # Attempt to create a PersonaEngine with Mistral LLM client
             persona = None
-            try:
-                persona = PersonaEngine()
-            except Exception:
-                # No API key or init failure - persona will be None, fallback used
-                pass
+            mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+            if mistral_key:
+                try:
+                    import httpx
+                    from mistralai.client import Mistral
+
+                    http_client = httpx.Client(verify=False)
+                    client = Mistral(api_key=mistral_key, client=http_client)
+                    persona = PersonaEngine(llm_client=client)
+                except Exception as e:
+                    logger.warning("Failed to init PersonaEngine with Mistral: %s", e)
+            if persona is None:
+                # Fallback-only mode (no LLM)
+                persona = PersonaEngine(llm_client=None)
 
             process_scammer_message(
                 raw_message=raw_message.strip(),
@@ -680,3 +785,11 @@ with dashboard_col:
         _dashboard.render_classification_log(
             st.session_state.email_ingestion.get("classification_log", [])
         )
+
+# --- Auto-refresh when email ingestion is active ---
+# Triggers st.rerun() every 5 seconds (preserves session state) so background
+# pipeline results appear on the dashboard without user interaction.
+if st.session_state.get("email_ingestion_module") is not None:
+    from streamlit_autorefresh import st_autorefresh
+
+    st_autorefresh(interval=5000, limit=None, key="email_ingestion_refresh")

@@ -16,6 +16,7 @@ from components.email_ingestion import (
     _DEGRADED_FAILURE_THRESHOLD,
     EmailIngestionModule,
 )
+from components.smtp_client import SMTPClient
 from models.email_models import (
     ClassificationResult,
     EmailMessage,
@@ -111,6 +112,9 @@ def _build_module(
     smtp_client = smtp_mock or MagicMock()
     llm_client = llm_mock or MagicMock()
 
+    # Ensure compose_reply_subject returns a real string
+    smtp_client.compose_reply_subject = SMTPClient.compose_reply_subject
+
     classifier_from_components = _build_classifier(llm_client)
 
     module = EmailIngestionModule(
@@ -145,7 +149,7 @@ class TestEndToEndScamFlow:
         # Setup mocks
         imap_mock = MagicMock()
         imap_mock.is_connected = True
-        imap_mock.fetch_unread.return_value = [_make_scam_email_bytes()]
+        imap_mock.fetch_unread.return_value = [("1", _make_scam_email_bytes())]
 
         smtp_mock = MagicMock()
         llm_mock = MagicMock()
@@ -153,8 +157,10 @@ class TestEndToEndScamFlow:
         # LLM response for stage 2 (won't be needed since stage 1 confidence > 0.7)
         # But set it up in case
         llm_response = MagicMock()
-        llm_response.text = '{"verdict": "scam", "reasoning": "obvious scam"}'
-        llm_mock.generate_content.return_value = llm_response
+        llm_choice = MagicMock()
+        llm_choice.message.content = '{"verdict": "scam", "reasoning": "obvious scam"}'
+        llm_response.choices = [llm_choice]
+        llm_mock.chat.complete.return_value = llm_response
 
         module = _build_module(
             imap_mock=imap_mock,
@@ -339,37 +345,33 @@ class TestBlockedMessageFlow:
 
         extract_called_with: list[str] = []
 
-        threat_instance = MagicMock()
         extraction_result = MagicMock()
         extraction_result.iocs = ["some_ioc"]
 
-        async def mock_extract(body: str) -> Any:
+        def mock_extract(body: str) -> Any:
             extract_called_with.append(body)
             return extraction_result
 
-        threat_instance.extract_iocs = mock_extract
+        # Patch the instance's threat_parser directly
+        module._threat_parser.extract_iocs = mock_extract
 
-        with patch(
-            "components.threat_parser.ThreatParser",
-            return_value=threat_instance,
-        ):
-            raw_bytes = _make_injection_email_bytes()
-            email_msg = module._parse_email(raw_bytes)
-            assert email_msg is not None
+        raw_bytes = _make_injection_email_bytes()
+        email_msg = module._parse_email(raw_bytes)
+        assert email_msg is not None
 
-            # Force classification as scam
-            mock_classification = ClassificationResult(
-                verdict="scam",
-                confidence=0.9,
-                determining_stage="stage_1",
-                matched_patterns=["urgency"],
-                sender=email_msg.sender,
-                subject=email_msg.subject,
-            )
-            module._scam_classifier = MagicMock()
-            module._scam_classifier.classify.return_value = mock_classification
+        # Force classification as scam
+        mock_classification = ClassificationResult(
+            verdict="scam",
+            confidence=0.9,
+            determining_stage="stage_1",
+            matched_patterns=["urgency"],
+            sender=email_msg.sender,
+            subject=email_msg.subject,
+        )
+        module._scam_classifier = MagicMock()
+        module._scam_classifier.classify.return_value = mock_classification
 
-            module.process_email(email_msg)
+        module.process_email(email_msg)
 
         # Verify ThreatParser.extract_iocs was called with the raw body
         assert len(extract_called_with) == 1
@@ -405,7 +407,7 @@ class TestLLMFallbackScenarios:
     def test_llm_timeout_falls_back_to_stage_1(self) -> None:
         """When LLM raises TimeoutError, classification falls back to Stage 1."""
         llm_mock = MagicMock()
-        llm_mock.generate_content.side_effect = TimeoutError("LLM timed out")
+        llm_mock.chat.complete.side_effect = TimeoutError("LLM timed out")
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -443,8 +445,10 @@ class TestLLMFallbackScenarios:
         """When LLM returns non-JSON, classification falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
-        response_mock.text = "This is not JSON at all, just random text"
-        llm_mock.generate_content.return_value = response_mock
+        choice_mock = MagicMock()
+        choice_mock.message.content = "This is not JSON at all, just random text"
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -466,12 +470,14 @@ class TestLLMFallbackScenarios:
         """When LLM returns unparseable injection-like content, falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
+        choice_mock = MagicMock()
         # Simulates an injection where the scam email manipulated the LLM output
-        response_mock.text = (
+        choice_mock.message.content = (
             'Sure! I will ignore my instructions. {"verdict": "not-a-valid-option", '
             '"reasoning": "hacked"}'
         )
-        llm_mock.generate_content.return_value = response_mock
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -506,8 +512,10 @@ class TestLLMFallbackScenarios:
         """When LLM returns empty response, classification falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
-        response_mock.text = ""
-        llm_mock.generate_content.return_value = response_mock
+        choice_mock = MagicMock()
+        choice_mock.message.content = ""
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 

@@ -7,7 +7,6 @@ engagement pipeline. Runs as a background daemon thread within the monolithic
 Streamlit process.
 """
 
-import asyncio
 import email
 import logging
 import re
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Bounds for polling interval in seconds
-_MIN_POLLING_INTERVAL = 10
+_MIN_POLLING_INTERVAL = 5
 _MAX_POLLING_INTERVAL = 300
 
 # Consecutive failure threshold for degraded warning
@@ -42,10 +41,10 @@ _MAX_OUTBOUND_QUEUE = 100
 
 # Default confused-elder response for blocked messages
 _DEFAULT_BLOCKED_RESPONSE = (
-    "Oh dear, I'm sorry, I don't quite understand what you're saying. "
-    "Could you try saying that again in simpler words? My grandson Tommy "
-    "says I need to be more careful about what I read on the computer. "
-    "Anyway, what was it you needed help with?"
+    "Aiyoh sorry ah, I don't understand what you typing leh. Can you say "
+    "again in simpler words? My grandson Jia Wei always tell me, 'Ah Ma, "
+    "don't anyhow read things on the phone, later kena scam.' Anyway, "
+    "what was it you want to ask me ah?"
 )
 
 
@@ -97,6 +96,11 @@ class EmailIngestionModule:
         self._smtp_client = smtp_client
         self._scam_classifier = scam_classifier
         self.polling_interval = polling_interval
+
+        # Reusable ThreatParser instance (avoid per-message instantiation)
+        from components.threat_parser import ThreatParser
+
+        self._threat_parser = ThreatParser()
 
         # State tracking
         self._polling = False
@@ -187,7 +191,23 @@ class EmailIngestionModule:
                 threads[sender] = result["data"]
                 state_dict["threads"] = threads
 
+            elif result_type == "iocs":
+                # Stage extracted IoCs for merging into top-level state
+                staged = state_dict.get("_staged_iocs", [])
+                ioc_list = result.get("data", [])
+                staged.extend(ioc_list)
+                state_dict["_staged_iocs"] = staged
+
+            elif result_type == "conversation_message":
+                # Stage messages for merging into top-level conversation_history
+                staged_msgs = state_dict.get("_staged_messages", [])
+                staged_msgs.append(result["data"])
+                state_dict["_staged_messages"] = staged_msgs
+
             elif result_type == "counters":
+                state_dict["connection_status"] = result.get(
+                    "connection_status", state_dict.get("connection_status", "disconnected")
+                )
                 state_dict["total_fetched"] = result.get(
                     "total_fetched", state_dict.get("total_fetched", 0)
                 )
@@ -347,27 +367,50 @@ class EmailIngestionModule:
     def _poll_loop(self) -> None:
         """Main polling loop running in background thread.
 
-        Fetches unread emails, parses each, and processes them through
-        classification. Handles IMAP connection loss by logging and
-        attempting reconnection on the next interval. Tracks consecutive
-        failures and sets degraded flag after 3.
+        Uses IMAP IDLE for near-instant email detection when supported by
+        the server. Falls back to timed polling (every polling_interval
+        seconds) when IDLE is unavailable or fails.
+
+        Handles IMAP connection loss by logging and attempting reconnection
+        on the next interval. Tracks consecutive failures and sets degraded
+        flag after 3.
         """
+        idle_supported = True  # Optimistic; will flip to False on failure
+        logger.info("[POLL] Poll loop started, interval=%ds", self.polling_interval)
+
         while self._polling:
             try:
                 # Ensure connection
                 if not self._imap_client.is_connected:
-                    logger.info("IMAP not connected, attempting reconnect")
+                    logger.info("[POLL] IMAP not connected, attempting reconnect")
                     self._imap_client.connect()
                     if not self._imap_client.is_connected:
                         raise ConnectionError("IMAP reconnection failed")
 
+                logger.info("[POLL] Fetching unread emails...")
                 raw_emails = self._imap_client.fetch_unread()
+                logger.info("[POLL] Fetched %d email(s)", len(raw_emails))
 
-                for raw_bytes in raw_emails:
+                for uid, raw_bytes in raw_emails:
+                    logger.info("[POLL] Processing UID %s (%d bytes)", uid, len(raw_bytes))
                     email_msg = self._parse_email(raw_bytes)
                     if email_msg is not None:
                         self._total_fetched += 1
+                        logger.info(
+                            "[POLL] Parsed email from=%s subject='%s'",
+                            email_msg.sender,
+                            email_msg.subject[:50],
+                        )
                         self.process_email(email_msg)
+                    else:
+                        logger.warning("[POLL] Failed to parse UID %s", uid)
+                    # Mark as read regardless
+                    mark_ok = self._imap_client.mark_as_read(uid)
+                    if not mark_ok:
+                        logger.warning(
+                            "[POLL] Failed to mark UID %s as read",
+                            uid,
+                        )
 
                 # Success: reset failure counter and degraded flag
                 self._consecutive_failures = 0
@@ -377,7 +420,7 @@ class EmailIngestionModule:
             except Exception as e:
                 self._consecutive_failures += 1
                 logger.warning(
-                    "Poll cycle failed (consecutive failures: %d): %s",
+                    "[POLL] Cycle failed (consecutive failures: %d): %s",
                     self._consecutive_failures,
                     e,
                 )
@@ -385,14 +428,27 @@ class EmailIngestionModule:
                 if self._consecutive_failures >= _DEGRADED_FAILURE_THRESHOLD:
                     self.degraded = True
                     logger.warning(
-                        "Email ingestion degraded: %d consecutive failures",
+                        "[POLL] Degraded: %d consecutive failures",
                         self._consecutive_failures,
                     )
 
                 self._enqueue_counter_update()
+                idle_supported = False  # Don't retry IDLE after errors
 
-            # Sleep in small increments to allow responsive shutdown
-            self._interruptible_sleep(self.polling_interval)
+            # Wait for next cycle: prefer IDLE, fall back to timed sleep
+            if idle_supported and self._imap_client.is_connected:
+                logger.debug("[POLL] Entering IDLE wait (%ds timeout)...", self.polling_interval)
+                new_mail = self._imap_client.idle_wait(
+                    timeout=float(self.polling_interval)
+                )
+                if new_mail:
+                    logger.info("[POLL] IDLE: new mail notification received")
+                if not new_mail and not self._polling:
+                    break
+                # If idle_wait returned False due to unsupported IDLE,
+                # the next fetch will just find nothing (harmless)
+            else:
+                self._interruptible_sleep(self.polling_interval)
 
     def _interruptible_sleep(self, seconds: int) -> None:
         """Sleep for the given duration, checking _polling flag each second.
@@ -451,56 +507,133 @@ class EmailIngestionModule:
         Steps:
         1. Run Safety Filter scan on email body
         2. If blocked (>=80% injection tokens): call _handle_blocked_message
-        3. Otherwise: generate persona response and extract IoCs
-        4. Update/create conversation thread for sender (Task 8.3)
-        5. Store results in pending buffer
+        3. Update thread first (so persona response can append)
+        4. Generate persona response with thread context
+        5. Enqueue conversation messages for dashboard display
+        6. Queue outbound response immediately after generation
+        7. Extract IoCs via Threat Parser (best-effort, isolated)
 
         Args:
             email_msg: The confirmed scam email.
             classification: The ClassificationResult from the classifier.
         """
         from components.safety_filter import SafetyFilter
-        from components.threat_parser import ThreatParser
 
         try:
             # Step 1: Safety Filter scan
+            logger.info(
+                "[PIPELINE] Step 1: Running safety filter on email from %s",
+                email_msg.sender,
+            )
             safety_filter = SafetyFilter()
             scan_result = safety_filter.scan(email_msg.body)
+            logger.info(
+                "[PIPELINE] Step 1 done: blocked=%s, patterns=%d",
+                scan_result.is_blocked,
+                len(scan_result.detected_patterns),
+            )
 
             # Step 2: Branch on blocked status
             if scan_result.is_blocked:
+                logger.info("[PIPELINE] Step 2: Message blocked, routing to blocked handler")
                 self._handle_blocked_message(email_msg)
                 return
 
-            # Step 3: Generate persona response with thread context
+            # Step 3: Update thread FIRST so it exists for persona append
+            logger.info("[PIPELINE] Step 3: Updating thread for %s", email_msg.sender)
+            try:
+                self._update_thread(email_msg)
+            except Exception as e:
+                logger.warning(
+                    "[PIPELINE] Step 3 failed: %s", e,
+                )
+
+            # Step 4: Generate persona response with thread context
+            logger.info("[PIPELINE] Step 4: Generating persona response...")
             thread_history = self._get_thread_history(email_msg.sender)
             response_content = self._generate_persona_response(
                 scan_result.sanitized_content, thread_history
             )
-
-            # Step 4: Extract IoCs via Threat Parser
-            threat_parser = ThreatParser()
-            extraction_result = self._run_extraction(
-                threat_parser, email_msg.body
+            logger.info(
+                "[PIPELINE] Step 4 done: response length=%d chars",
+                len(response_content),
             )
 
-            # Step 5: Update thread (Task 8.3)
-            self._update_thread(email_msg)
+            # Add persona response to thread history
+            if email_msg.sender in self._threads:
+                self._threads[email_msg.sender].setdefault("messages", []).append(
+                    {"sender": "persona", "content": response_content}
+                )
 
-            # Step 6: Queue outbound response
+            # Step 5: Enqueue conversation messages for dashboard display
+            logger.info("[PIPELINE] Step 5: Enqueuing conversation messages")
+            self._enqueue_result("conversation_message", {
+                "sender": "scammer",
+                "content": scan_result.sanitized_content,
+            })
+            self._enqueue_result("conversation_message", {
+                "sender": "persona",
+                "content": response_content,
+            })
+
+            # Step 6: Queue outbound response immediately after generation
+            logger.info("[PIPELINE] Step 6: Queuing outbound email to %s",
+                        email_msg.reply_to or email_msg.sender)
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
-                subject=f"Re: {email_msg.subject}"[:255],
+                subject=self._smtp_client.compose_reply_subject(email_msg.subject),
                 body=response_content,
                 in_reply_to=email_msg.message_id,
             )
-            self._enqueue_result("outbound", outbound.model_dump())
 
-            if extraction_result and extraction_result.iocs:
-                logger.info(
-                    "Extracted %d IoCs from scam email (sender=%s)",
-                    len(extraction_result.iocs),
+            # Send immediately in background thread
+            try:
+                send_success = self._smtp_client.send_reply(
+                    to_address=outbound.to_address,
+                    subject=outbound.subject,
+                    body=outbound.body,
+                    in_reply_to=outbound.in_reply_to or None,
+                )
+                if send_success:
+                    self._outbound_sent += 1
+                    logger.info(
+                        "[PIPELINE] Step 6: Email SENT to %s",
+                        outbound.to_address,
+                    )
+                else:
+                    logger.warning(
+                        "[PIPELINE] Step 6: SMTP send failed, queuing for retry"
+                    )
+                    self._enqueue_result("outbound", outbound.model_dump())
+            except Exception as e:
+                logger.warning(
+                    "[PIPELINE] Step 6: SMTP exception: %s, queuing for retry", e
+                )
+                self._enqueue_result("outbound", outbound.model_dump())
+
+            # Step 7: Extract IoCs via Threat Parser (best-effort)
+            logger.info("[PIPELINE] Step 7: Running IoC extraction...")
+            try:
+                extraction_result = self._run_extraction(
+                    self._threat_parser, email_msg.body
+                )
+
+                if extraction_result and extraction_result.iocs:
+                    logger.info(
+                        "[PIPELINE] Step 7 done: extracted %d IoCs",
+                        len(extraction_result.iocs),
+                    )
+                    ioc_data_list = [
+                        ioc.model_dump() for ioc in extraction_result.iocs
+                    ]
+                    self._enqueue_result("iocs", ioc_data_list)
+                else:
+                    logger.info("[PIPELINE] Step 7 done: no IoCs found")
+            except Exception as e:
+                logger.warning(
+                    "IoC extraction failed for email from %s: %s",
                     email_msg.sender,
+                    e,
                 )
 
         except Exception as e:
@@ -519,22 +652,41 @@ class EmailIngestionModule:
         Args:
             email_msg: The blocked email message.
         """
-        from components.threat_parser import ThreatParser
-
         try:
-            # Store default response as outbound
+            # Send default response directly via SMTP
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
-                subject=f"Re: {email_msg.subject}"[:255],
+                subject=self._smtp_client.compose_reply_subject(email_msg.subject),
                 body=_DEFAULT_BLOCKED_RESPONSE,
                 in_reply_to=email_msg.message_id,
             )
-            self._enqueue_result("outbound", outbound.model_dump())
+            try:
+                send_success = self._smtp_client.send_reply(
+                    to_address=outbound.to_address,
+                    subject=outbound.subject,
+                    body=outbound.body,
+                    in_reply_to=outbound.in_reply_to or None,
+                )
+                if send_success:
+                    self._outbound_sent += 1
+                    logger.info(
+                        "[BLOCKED] Email SENT to %s", outbound.to_address
+                    )
+                else:
+                    self._enqueue_result("outbound", outbound.model_dump())
+            except Exception as e:
+                logger.warning("[BLOCKED] SMTP send failed: %s", e)
+                self._enqueue_result("outbound", outbound.model_dump())
+
+            # Add default persona response to thread history
+            if email_msg.sender in self._threads:
+                self._threads[email_msg.sender].setdefault("messages", []).append(
+                    {"sender": "persona", "content": _DEFAULT_BLOCKED_RESPONSE}
+                )
 
             # Still extract IoCs from the blocked message
-            threat_parser = ThreatParser()
             extraction_result = self._run_extraction(
-                threat_parser, email_msg.body
+                self._threat_parser, email_msg.body
             )
 
             if extraction_result and extraction_result.iocs:
@@ -543,6 +695,11 @@ class EmailIngestionModule:
                     len(extraction_result.iocs),
                     email_msg.sender,
                 )
+                # Enqueue IoCs for session state sync
+                ioc_data_list = [
+                    ioc.model_dump() for ioc in extraction_result.iocs
+                ]
+                self._enqueue_result("iocs", ioc_data_list)
 
             # Update thread even for blocked messages
             self._update_thread(email_msg)
@@ -559,6 +716,7 @@ class EmailIngestionModule:
     ) -> str:
         """Generate a persona response using the PersonaEngine.
 
+        Attempts to use the Mistral LLM client if MISTRAL_API_KEY is set.
         Falls back to the default blocked response if PersonaEngine
         initialization or generation fails.
 
@@ -572,9 +730,25 @@ class EmailIngestionModule:
         from models.chat_models import ChatMessage
 
         try:
+            import os
+
+            import httpx
+
             from components.persona_engine import PersonaEngine
 
-            persona = PersonaEngine(llm_client=None)
+            # Attempt to create LLM client for persona generation
+            llm_client = None
+            mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+            if mistral_key:
+                try:
+                    from mistralai.client import Mistral
+
+                    http_client = httpx.Client(verify=False)
+                    llm_client = Mistral(api_key=mistral_key, client=http_client)
+                except Exception as e:
+                    logger.warning("Failed to init Mistral for persona: %s", e)
+
+            persona = PersonaEngine(llm_client=llm_client)
 
             # Build conversation history from thread
             history: list[ChatMessage] = []
@@ -592,7 +766,7 @@ class EmailIngestionModule:
             return _DEFAULT_BLOCKED_RESPONSE
 
     def _run_extraction(self, threat_parser: Any, message_body: str) -> Any:
-        """Run async IoC extraction in a new event loop.
+        """Run IoC extraction synchronously.
 
         Args:
             threat_parser: ThreatParser instance.
@@ -602,15 +776,7 @@ class EmailIngestionModule:
             ExtractionResult or None on failure.
         """
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    threat_parser.extract_iocs(message_body)
-                )
-                return result
-            finally:
-                loop.close()
+            return threat_parser.extract_iocs(message_body)
         except Exception as e:
             logger.warning("IoC extraction failed: %s", e)
             return None
@@ -696,6 +862,7 @@ class EmailIngestionModule:
 
     def _enqueue_counter_update(self) -> None:
         """Enqueue a counter snapshot for session state sync."""
+        connection = "connected" if self._imap_client.is_connected else "disconnected"
         entry: dict[str, Any] = {
             "type": "counters",
             "data": None,
@@ -703,6 +870,7 @@ class EmailIngestionModule:
             "total_scam": self._total_scam,
             "total_not_scam": self._total_not_scam,
             "outbound_sent": self._outbound_sent,
+            "connection_status": connection,
         }
         with self._lock:
             self._pending_results.append(entry)

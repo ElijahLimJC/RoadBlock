@@ -93,7 +93,7 @@ class TestFetchUnread:
     def test_fetch_unread_multiple_messages(
         self, mock_ssl_cls: MagicMock, client: IMAPClient
     ) -> None:
-        """Fetches multiple unread messages as raw bytes."""
+        """Fetches multiple unread messages as (uid, raw_bytes) tuples."""
         mock_conn = MagicMock()
         mock_conn.login.return_value = ("OK", [b"Logged in"])
         mock_conn.noop.return_value = ("OK", [b"Nothing"])
@@ -111,12 +111,15 @@ class TestFetchUnread:
         mock_ssl_cls.return_value = mock_conn
 
         client.connect()
+        # Pre-set baseline so first fetch_unread returns messages
+        client._baseline_set = True
+        client._baseline_uid = 0
         messages = client.fetch_unread()
 
         assert len(messages) == 3
-        assert messages[0] == b"raw email content 1"
-        assert messages[1] == b"raw email content 2"
-        assert messages[2] == b"raw email content 3"
+        assert messages[0] == ("1", b"raw email content 1")
+        assert messages[1] == ("2", b"raw email content 2")
+        assert messages[2] == ("3", b"raw email content 3")
 
     @patch("components.imap_client.imaplib.IMAP4_SSL")
     def test_fetch_unread_no_messages(
@@ -155,10 +158,13 @@ class TestFetchUnread:
         mock_ssl_cls.return_value = mock_conn
 
         client.connect()
+        # Pre-set baseline so first fetch_unread returns messages
+        client._baseline_set = True
+        client._baseline_uid = 0
         messages = client.fetch_unread()
 
         assert len(messages) == 1
-        assert messages[0] == b"raw email content 2"
+        assert messages[0] == ("2", b"raw email content 2")
 
 
 class TestMarkAsRead:
