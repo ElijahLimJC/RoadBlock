@@ -6,11 +6,9 @@ Pydantic models. All parsing functions are wrapped in try/except to
 ensure graceful degradation under noisy input (Noisy Input Defense).
 """
 
-import asyncio
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+import time
 
 import base58
 import bech32
@@ -890,85 +888,49 @@ class ThreatParser:
     ) -> "phonenumbers.PhoneNumber | None":
         """Attempt to parse a phone number without a plus prefix.
 
-        Tries parsing with common default regions (US, GB, DE, AU, IN).
-        If parsing succeeds with exactly one valid interpretation, returns
-        the parsed number. If ambiguous (multiple valid results from
-        different regions) or no valid parse, logs a rejection and
-        returns None.
+        Tries parsing with SG region first (primary scam target). If SG
+        parsing succeeds, returns immediately. Otherwise falls through to
+        other common regions. Returns None if no valid parse found.
 
         Args:
             candidate: Phone number string without plus prefix.
             rejections: List to append rejections to if parsing fails.
 
         Returns:
-            Parsed PhoneNumber object if unambiguous, or None.
+            Parsed PhoneNumber object if valid, or None.
         """
-        # Try a set of common regions to see if the number resolves
-        # unambiguously to a single E.164 representation
-        common_regions = ["US", "GB", "DE", "AU", "IN", "FR", "JP", "BR"]
-        valid_e164_results: set[str] = set()
+        # SG first - primary target for this honeypot
+        try:
+            parsed = phonenumbers.parse(candidate, "SG")
+            if phonenumbers.is_valid_number(parsed):
+                return parsed
+        except phonenumbers.NumberParseException:
+            pass
 
-        for region in common_regions:
+        # Fallback to other common regions
+        fallback_regions = ["US", "GB", "DE", "AU", "IN", "FR", "JP", "BR"]
+        for region in fallback_regions:
             try:
                 parsed = phonenumbers.parse(candidate, region)
                 if phonenumbers.is_valid_number(parsed):
-                    e164 = phonenumbers.format_number(
-                        parsed, phonenumbers.PhoneNumberFormat.E164
-                    )
-                    valid_e164_results.add(e164)
+                    return parsed
             except phonenumbers.NumberParseException:
                 continue
 
-        if len(valid_e164_results) == 0:
-            rejections.append(
-                RejectionLogEntry(
-                    candidate=candidate,
-                    rejection_reason=(
-                        "Unrecognizable format: could not parse as a "
-                        "valid phone number in any common region"
-                    ),
-                    ioc_category=IoCCategory.PHONE_NUMBER,
-                )
+        rejections.append(
+            RejectionLogEntry(
+                candidate=candidate,
+                rejection_reason=(
+                    "Unrecognizable format: could not parse as a "
+                    "valid phone number in any common region"
+                ),
+                ioc_category=IoCCategory.PHONE_NUMBER,
             )
-            logger.debug(
-                "Rejected phone candidate '%s': no valid parse in any region",
-                candidate,
-            )
-            return None
-
-        if len(valid_e164_results) > 1:
-            rejections.append(
-                RejectionLogEntry(
-                    candidate=candidate,
-                    rejection_reason=(
-                        f"Ambiguous country code: resolves to "
-                        f"{len(valid_e164_results)} different E.164 numbers "
-                        f"({', '.join(sorted(valid_e164_results))})"
-                    ),
-                    ioc_category=IoCCategory.PHONE_NUMBER,
-                )
-            )
-            logger.debug(
-                "Rejected phone candidate '%s': ambiguous (%d results)",
-                candidate,
-                len(valid_e164_results),
-            )
-            return None
-
-        # Exactly one valid result — parse it again with the matching region
-        target_e164 = next(iter(valid_e164_results))
-        for region in common_regions:
-            try:
-                parsed = phonenumbers.parse(candidate, region)
-                if phonenumbers.is_valid_number(parsed):
-                    e164 = phonenumbers.format_number(
-                        parsed, phonenumbers.PhoneNumberFormat.E164
-                    )
-                    if e164 == target_e164:
-                        return parsed
-            except phonenumbers.NumberParseException:
-                continue
-
+        )
+        logger.debug(
+            "Rejected phone candidate '%s': no valid parse in any region",
+            candidate,
+        )
         return None
 
     def extract_mule_accounts(
@@ -1175,12 +1137,12 @@ class ThreatParser:
 
         return True, ""
 
-    async def extract_iocs(self, message: str) -> ExtractionResult:
-        """Async extraction of all IoC types from a message.
+    def extract_iocs(self, message: str) -> ExtractionResult:
+        """Synchronous extraction of all IoC types from a message.
 
-        Orchestrates all four extraction methods concurrently using
-        asyncio.run_in_executor to avoid blocking the event loop.
-        Completes within 5 seconds; returns partial results on timeout.
+        Runs all four extraction methods sequentially with a cooperative
+        timeout: checks elapsed time between each stage and returns partial
+        results if cumulative time exceeds 5 seconds.
 
         Args:
             message: Raw message text to extract IoCs from.
@@ -1190,73 +1152,75 @@ class ThreatParser:
         """
         all_iocs: list[BaseIoC] = []
         all_rejections: list[RejectionLogEntry] = []
+        timeout = 5.0
 
         try:
-            loop = asyncio.get_event_loop()
-            executor = ThreadPoolExecutor(max_workers=4)
+            start = time.monotonic()
 
-            # Schedule all four extraction methods concurrently
-            crypto_future = loop.run_in_executor(
-                executor, self.extract_crypto_wallets, message
-            )
-            domains_future = loop.run_in_executor(
-                executor, self.extract_phishing_domains, message
-            )
-            phones_future = loop.run_in_executor(
-                executor, self.extract_phone_numbers, message
-            )
-            mule_future = loop.run_in_executor(
-                executor, self.extract_mule_accounts, message
-            )
+            # Stage 1: Crypto wallets
+            try:
+                iocs, rejections = self.extract_crypto_wallets(message)
+                all_iocs.extend(iocs)
+                all_rejections.extend(rejections)
+            except Exception as e:
+                logger.warning("Extraction method crypto_wallets raised: %s", e)
 
-            # Wrap executor futures as asyncio tasks for use with asyncio.wait
-            tasks = [
-                asyncio.ensure_future(crypto_future),
-                asyncio.ensure_future(domains_future),
-                asyncio.ensure_future(phones_future),
-                asyncio.ensure_future(mule_future),
-            ]
-            task_names = [
-                "crypto_wallets",
-                "phishing_domains",
-                "phone_numbers",
-                "mule_accounts",
-            ]
-
-            # Use asyncio.wait with timeout — does NOT cancel pending tasks
-            done, pending = await asyncio.wait(
-                tasks, timeout=5.0, return_when=asyncio.ALL_COMPLETED
-            )
-
-            if pending:
+            if time.monotonic() - start >= timeout:
                 logger.warning(
-                    "IoC extraction timed out after 5s, "
-                    "%d task(s) still pending — returning partial results",
-                    len(pending),
+                    "IoC extraction timed out after 5s at stage 1"
+                    " — returning partial results"
                 )
-                # Cancel pending tasks to clean up
-                for task in pending:
-                    task.cancel()
+                return ExtractionResult(
+                    iocs=all_iocs, rejections=all_rejections
+                )
 
-            # Collect results from completed tasks
-            for name, task in zip(task_names, tasks):
-                if task in done:
-                    try:
-                        result = task.result()
-                        if isinstance(result, Exception):
-                            logger.warning(
-                                "Extraction method %s failed: %s", name, result
-                            )
-                            continue
-                        iocs, rejections = result
-                        all_iocs.extend(iocs)
-                        all_rejections.extend(rejections)
-                    except Exception as e:
-                        logger.warning(
-                            "Extraction method %s raised: %s", name, e
-                        )
+            # Stage 2: Phishing domains
+            try:
+                iocs, rejections = self.extract_phishing_domains(message)
+                all_iocs.extend(iocs)
+                all_rejections.extend(rejections)
+            except Exception as e:
+                logger.warning(
+                    "Extraction method phishing_domains raised: %s", e
+                )
 
-            executor.shutdown(wait=False)
+            if time.monotonic() - start >= timeout:
+                logger.warning(
+                    "IoC extraction timed out after 5s at stage 2"
+                    " — returning partial results"
+                )
+                return ExtractionResult(
+                    iocs=all_iocs, rejections=all_rejections
+                )
+
+            # Stage 3: Phone numbers
+            try:
+                iocs, rejections = self.extract_phone_numbers(message)
+                all_iocs.extend(iocs)
+                all_rejections.extend(rejections)
+            except Exception as e:
+                logger.warning(
+                    "Extraction method phone_numbers raised: %s", e
+                )
+
+            if time.monotonic() - start >= timeout:
+                logger.warning(
+                    "IoC extraction timed out after 5s at stage 3"
+                    " — returning partial results"
+                )
+                return ExtractionResult(
+                    iocs=all_iocs, rejections=all_rejections
+                )
+
+            # Stage 4: Mule bank accounts
+            try:
+                iocs, rejections = self.extract_mule_accounts(message)
+                all_iocs.extend(iocs)
+                all_rejections.extend(rejections)
+            except Exception as e:
+                logger.warning(
+                    "Extraction method mule_accounts raised: %s", e
+                )
 
         except Exception as e:
             logger.warning(

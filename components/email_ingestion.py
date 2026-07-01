@@ -7,7 +7,6 @@ engagement pipeline. Runs as a background daemon thread within the monolithic
 Streamlit process.
 """
 
-import asyncio
 import email
 import logging
 import re
@@ -97,6 +96,11 @@ class EmailIngestionModule:
         self._smtp_client = smtp_client
         self._scam_classifier = scam_classifier
         self.polling_interval = polling_interval
+
+        # Reusable ThreatParser instance (avoid per-message instantiation)
+        from components.threat_parser import ThreatParser
+
+        self._threat_parser = ThreatParser()
 
         # State tracking
         self._polling = False
@@ -478,7 +482,6 @@ class EmailIngestionModule:
             classification: The ClassificationResult from the classifier.
         """
         from components.safety_filter import SafetyFilter
-        from components.threat_parser import ThreatParser
 
         try:
             # Step 1: Safety Filter scan
@@ -513,9 +516,8 @@ class EmailIngestionModule:
 
             # Step 5: Extract IoCs via Threat Parser (best-effort)
             try:
-                threat_parser = ThreatParser()
                 extraction_result = self._run_extraction(
-                    threat_parser, email_msg.body
+                    self._threat_parser, email_msg.body
                 )
 
                 if extraction_result and extraction_result.iocs:
@@ -562,8 +564,6 @@ class EmailIngestionModule:
         Args:
             email_msg: The blocked email message.
         """
-        from components.threat_parser import ThreatParser
-
         try:
             # Store default response as outbound
             outbound = OutboundEmail(
@@ -581,9 +581,8 @@ class EmailIngestionModule:
                 )
 
             # Still extract IoCs from the blocked message
-            threat_parser = ThreatParser()
             extraction_result = self._run_extraction(
-                threat_parser, email_msg.body
+                self._threat_parser, email_msg.body
             )
 
             if extraction_result and extraction_result.iocs:
@@ -646,7 +645,7 @@ class EmailIngestionModule:
             return _DEFAULT_BLOCKED_RESPONSE
 
     def _run_extraction(self, threat_parser: Any, message_body: str) -> Any:
-        """Run async IoC extraction in a new event loop.
+        """Run IoC extraction synchronously.
 
         Args:
             threat_parser: ThreatParser instance.
@@ -656,15 +655,7 @@ class EmailIngestionModule:
             ExtractionResult or None on failure.
         """
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    threat_parser.extract_iocs(message_body)
-                )
-                return result
-            finally:
-                loop.close()
+            return threat_parser.extract_iocs(message_body)
         except Exception as e:
             logger.warning("IoC extraction failed: %s", e)
             return None

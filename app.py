@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, Optional
 
@@ -34,11 +33,8 @@ from models.email_models import ScamPattern
 
 logger = logging.getLogger(__name__)
 
-# --- Pipeline timeout (seconds), excluding async parser ---
+# --- Pipeline timeout (seconds), excluding parser stage ---
 _PIPELINE_TIMEOUT_SECONDS = 15.0
-
-# --- Thread pool for async threat parsing ---
-_extraction_executor = ThreadPoolExecutor(max_workers=2)
 
 
 class PipelineError(Exception):
@@ -78,6 +74,9 @@ def initialize_chat_state() -> None:
     for key, default in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = default
+
+    if "threat_parser_instance" not in st.session_state:
+        st.session_state["threat_parser_instance"] = ThreatParser()
 
     # Email ingestion state (Task 9.1)
     if "email_ingestion" not in st.session_state:
@@ -280,20 +279,20 @@ def process_scammer_message(
     2. Branch: blocked → default response; safe/partial → Persona_Engine
     3. Update Chat_State with message pair
     4. Stalling_Tracker.record_turn()
-    5. Trigger async Threat_Parser extraction via ThreadPoolExecutor
+    5. Threat_Parser extraction (direct call, synchronous)
     6. On extraction complete: MCP lookup → notifications for NEW IoCs → update state
 
     Error handling wraps each stage in try/except, logs PipelineError,
     and preserves Chat_State on failure.
 
-    Enforces 15s end-to-end timeout (excluding async parser).
+    Enforces 15s end-to-end timeout (excluding parser stage).
 
     Args:
         raw_message: The raw scammer input text.
         safety_filter: SafetyFilter instance (created if None).
         persona_engine: PersonaEngine instance (created if None).
         stalling_tracker: StallingTracker instance (created if None).
-        threat_parser: ThreatParser instance (created if None).
+        threat_parser: ThreatParser instance (uses session singleton if None).
         mcp_client: IoCLookupMCPClient instance (optional, skips MCP if None).
         notification_module: NotificationModule instance (created if None).
     """
@@ -305,7 +304,9 @@ def process_scammer_message(
     if stalling_tracker is None:
         stalling_tracker = StallingTracker()
     if threat_parser is None:
-        threat_parser = ThreatParser()
+        threat_parser = st.session_state.get(
+            "threat_parser_instance", ThreatParser()
+        )
     if notification_module is None:
         notification_module = NotificationModule()
 
@@ -402,30 +403,20 @@ def process_scammer_message(
         )
         return
 
-    # --- Stage 5: Trigger async Threat_Parser extraction ---
-    # Use the original raw message for extraction (captures IoCs even in blocked messages)
+    # --- Stage 5: Threat_Parser extraction + MCP lookup ---
     message_for_extraction = raw_message
 
     try:
         st.session_state["parser_status"] = "running"
-        # Capture session state reference for the background thread
-        session_state_ref = st.session_state
-        # Submit extraction and wait with timeout so IoCs appear immediately
-        future = _extraction_executor.submit(
-            _run_extraction_pipeline,
+        _run_extraction_pipeline(
             message_for_extraction,
             threat_parser,
             mcp_client,
             notification_module,
-            session_state_ref,
+            st.session_state,
         )
-        try:
-            future.result(timeout=8.0)
-        except Exception as e:
-            logger.warning("Extraction did not complete in time: %s", e)
-            st.session_state["parser_status"] = "idle"
     except Exception as e:
-        error = PipelineError("Threat_Parser", f"Extraction dispatch failed: {e}", e)
+        error = PipelineError("Threat_Parser", f"Extraction failed: {e}", e)
         logger.error(str(error), exc_info=True)
         st.session_state["parser_status"] = "error"
         st.session_state["last_error"] = str(error)
@@ -438,7 +429,7 @@ def _run_extraction_pipeline(
     notification_module: NotificationModule,
     state: Any = None,
 ) -> None:
-    """Run the extraction pipeline in a background thread.
+    """Run the extraction pipeline.
 
     Executes:
     1. ThreatParser.extract_iocs(message)
@@ -451,7 +442,7 @@ def _run_extraction_pipeline(
         threat_parser: ThreatParser instance.
         mcp_client: Optional MCP client for IoC lookups.
         notification_module: NotificationModule for generating alerts.
-        state: Session state reference passed from main thread.
+        state: Session state reference.
     """
     # Use passed state reference (background thread can't access st.session_state)
     if state is None:
@@ -462,15 +453,8 @@ def _run_extraction_pipeline(
             return
 
     try:
-        # Run async extraction in a new event loop (since we're in a thread)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            extraction_result = loop.run_until_complete(
-                threat_parser.extract_iocs(message)
-            )
-        finally:
-            loop.close()
+        # extract_iocs is now synchronous — call directly
+        extraction_result = threat_parser.extract_iocs(message)
 
         # Update rejection log
         if extraction_result.rejections:
