@@ -479,15 +479,20 @@ def _run_extraction_pipeline(
         if mcp_client is not None:
             try:
                 loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
                 try:
                     lookup_results = loop.run_until_complete(
-                        mcp_client.batch_check(extraction_result.iocs, cache)
+                        asyncio.wait_for(
+                            mcp_client.batch_check(extraction_result.iocs, cache),
+                            timeout=30.0,
+                        )
                     )
                 finally:
                     loop.close()
                 state["mcp_lookup_cache"] = cache
                 state["mcp_server_status"] = "connected"
+            except asyncio.TimeoutError:
+                logger.warning("MCP batch lookup timed out after 30s")
+                state["mcp_server_status"] = "disconnected"
             except Exception as e:
                 logger.warning("MCP batch lookup failed: %s", e)
                 state["mcp_server_status"] = "disconnected"
@@ -577,6 +582,24 @@ initialize_chat_state()
 # Initialize email ingestion (optional, depends on env vars)
 if "email_ingestion_module" not in st.session_state:
     st.session_state.email_ingestion_module = initialize_email_ingestion()
+
+
+def _cleanup_email_ingestion() -> None:
+    """Stop email ingestion polling on session teardown to prevent ghost threads."""
+    module = st.session_state.get("email_ingestion_module")
+    if module is not None:
+        module.stop_polling()
+
+
+# Register cleanup so the poll thread is stopped when the session ends
+if st.session_state.get("email_ingestion_module") is not None:
+    import atexit
+
+    # atexit handles interpreter shutdown; Streamlit session lifecycle
+    # doesn't expose on-close hooks, so this is the best available option.
+    if not st.session_state.get("_email_cleanup_registered"):
+        atexit.register(_cleanup_email_ingestion)
+        st.session_state["_email_cleanup_registered"] = True
 
 # Flush email ingestion results into session state each render cycle
 if st.session_state.get("email_ingestion_module") is not None:
