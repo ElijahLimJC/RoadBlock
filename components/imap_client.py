@@ -226,3 +226,73 @@ class IMAPClient:
         except Exception:
             self._connection = None
             return False
+
+    def idle_wait(self, timeout: float = 29.0) -> bool:
+        """Wait for new mail using IMAP IDLE command.
+
+        Sends IDLE to the server and waits for an EXISTS response indicating
+        new mail, or until timeout expires. IDLE is more efficient than polling
+        because it avoids repeated SEARCH commands.
+
+        RFC 2177 recommends clients re-issue IDLE every 29 minutes. We use
+        a shorter timeout (default 29s) to stay responsive to shutdown signals.
+
+        Args:
+            timeout: Maximum seconds to wait for server notification.
+
+        Returns:
+            True if new mail was indicated, False on timeout or error.
+        """
+        if not self.is_connected:
+            return False
+
+        try:
+            assert self._connection is not None
+            # Select INBOX before IDLE
+            self._connection.select("INBOX")
+
+            # Send IDLE command
+            tag = self._connection._new_tag()
+            self._connection.send(
+                tag + b" IDLE\r\n"
+            )
+
+            # Read the continuation response (+ idling)
+            resp = self._connection.readline()
+            if not resp.startswith(b"+"):
+                logger.debug("IDLE not supported by server: %s", resp)
+                return False
+
+            # Wait for server response (EXISTS = new mail)
+            self._connection.sock.settimeout(timeout)
+            try:
+                while True:
+                    line = self._connection.readline()
+                    if b"EXISTS" in line:
+                        # New mail arrived
+                        self._connection.send(b"DONE\r\n")
+                        self._connection.readline()  # Read tagged response
+                        return True
+                    if b"RECENT" in line:
+                        self._connection.send(b"DONE\r\n")
+                        self._connection.readline()
+                        return True
+            except (socket.timeout, OSError):
+                # Timeout - no new mail
+                self._connection.send(b"DONE\r\n")
+                try:
+                    self._connection.readline()
+                except Exception:
+                    pass
+                return False
+
+        except Exception as e:
+            logger.debug("IDLE wait failed: %s", e)
+            return False
+        finally:
+            # Restore default timeout
+            try:
+                if self._connection and self._connection.sock:
+                    self._connection.sock.settimeout(self.timeout)
+            except Exception:
+                pass

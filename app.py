@@ -242,7 +242,7 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
         imap_client=imap_client,
         smtp_client=smtp_client,
         scam_classifier=scam_classifier,
-        polling_interval=10,
+        polling_interval=5,
     )
 
     st.session_state.email_ingestion_module = module

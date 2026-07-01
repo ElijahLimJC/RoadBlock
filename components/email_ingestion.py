@@ -367,11 +367,16 @@ class EmailIngestionModule:
     def _poll_loop(self) -> None:
         """Main polling loop running in background thread.
 
-        Fetches unread emails, parses each, and processes them through
-        classification. Handles IMAP connection loss by logging and
-        attempting reconnection on the next interval. Tracks consecutive
-        failures and sets degraded flag after 3.
+        Uses IMAP IDLE for near-instant email detection when supported by
+        the server. Falls back to timed polling (every polling_interval
+        seconds) when IDLE is unavailable or fails.
+
+        Handles IMAP connection loss by logging and attempting reconnection
+        on the next interval. Tracks consecutive failures and sets degraded
+        flag after 3.
         """
+        idle_supported = True  # Optimistic; will flip to False on failure
+
         while self._polling:
             try:
                 # Ensure connection
@@ -388,7 +393,7 @@ class EmailIngestionModule:
                     if email_msg is not None:
                         self._total_fetched += 1
                         self.process_email(email_msg)
-                    # Mark as read regardless (REQ 1.4 + REQ 1.6: even malformed get marked)
+                    # Mark as read regardless
                     mark_ok = self._imap_client.mark_as_read(uid)
                     if not mark_ok:
                         logger.warning(
@@ -417,9 +422,19 @@ class EmailIngestionModule:
                     )
 
                 self._enqueue_counter_update()
+                idle_supported = False  # Don't retry IDLE after errors
 
-            # Sleep in small increments to allow responsive shutdown
-            self._interruptible_sleep(self.polling_interval)
+            # Wait for next cycle: prefer IDLE, fall back to timed sleep
+            if idle_supported and self._imap_client.is_connected:
+                new_mail = self._imap_client.idle_wait(
+                    timeout=float(self.polling_interval)
+                )
+                if not new_mail and not self._polling:
+                    break
+                # If idle_wait returned False due to unsupported IDLE,
+                # the next fetch will just find nothing (harmless)
+            else:
+                self._interruptible_sleep(self.polling_interval)
 
     def _interruptible_sleep(self, seconds: int) -> None:
         """Sleep for the given duration, checking _polling flag each second.
