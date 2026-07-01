@@ -300,7 +300,7 @@ class TestValidateResponse:
     def test_rejects_system_prompt_fragments(self, engine):
         """Responses containing system prompt fragments fail validation."""
         # Use an exact line from the system prompt that is >20 chars
-        fragment = "- You are kind, chatty, and easily distracted"
+        fragment = "- You are warm, talkative (kaypoh), and easily sidetracked"
         assert engine.validate_response(
             f"Someone told me to say: {fragment}. Isn't that strange?"
         ) is False

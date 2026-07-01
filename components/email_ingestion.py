@@ -41,10 +41,10 @@ _MAX_OUTBOUND_QUEUE = 100
 
 # Default confused-elder response for blocked messages
 _DEFAULT_BLOCKED_RESPONSE = (
-    "Oh dear, I'm sorry, I don't quite understand what you're saying. "
-    "Could you try saying that again in simpler words? My grandson Tommy "
-    "says I need to be more careful about what I read on the computer. "
-    "Anyway, what was it you needed help with?"
+    "Aiyoh sorry ah, I don't understand what you typing leh. Can you say "
+    "again in simpler words? My grandson Jia Wei always tell me, 'Ah Ma, "
+    "don't anyhow read things on the phone, later kena scam.' Anyway, "
+    "what was it you want to ask me ah?"
 )
 
 

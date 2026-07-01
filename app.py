@@ -257,10 +257,10 @@ def _get_default_blocked_response() -> str:
     so the Persona Engine is not invoked.
     """
     return (
-        "Oh dear, I'm sorry, I don't quite understand what you're saying. "
-        "Could you try saying that again in simpler words? My grandson Tommy "
-        "says I need to be more careful about what I read on the computer. "
-        "Anyway, what was it you needed help with?"
+        "Aiyoh sorry ah, I don't understand what you typing leh. Can you say "
+        "again in simpler words? My grandson Jia Wei always tell me, 'Ah Ma, "
+        "don't anyhow read things on the phone, later kena scam.' Anyway, "
+        "what was it you want to ask me ah?"
     )
 
 
