@@ -235,25 +235,16 @@ class ScamClassifier:
         matched = self._get_matched_patterns(subject, body)
 
         try:
-            # Support both new google-genai (Client) and old google-generativeai (Model)
-            if hasattr(self._llm_client, "models"):
-                # New SDK: client.models.generate_content()
-                from google.genai import types
-
-                response = self._llm_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                    ),
-                )
-                response_text = response.text if response and response.text else ""
-            else:
-                # Old SDK: model.generate_content()
-                response = self._llm_client.generate_content(
-                    prompt, request_options={"timeout": self.llm_timeout}
-                )
-                response_text = response.text if response and response.text else ""
+            response = self._llm_client.chat.complete(
+                model="mistral-small-latest",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            response_text = (
+                response.choices[0].message.content
+                if response and response.choices
+                else ""
+            )
         except Exception as e:
             logger.warning("Stage 2 LLM call failed: %s", e)
             return self._fallback_result(

@@ -2,7 +2,7 @@
 
 This module implements the conversational persona that engages scammers
 as a "Tech-Illiterate Confused Elder." It generates in-character responses
-using Google Gemini with a 10-second timeout and falls back to pre-written
+using Mistral with a 10-second timeout and falls back to pre-written
 responses when the LLM is unavailable or produces invalid output.
 """
 
@@ -331,12 +331,12 @@ _MAX_HISTORY_TURNS = 10
 class PersonaEngine:
     """LLM-driven conversational persona as "The Tech-Illiterate Confused Elder."
 
-    Generates in-character responses to scammer messages using Google Gemini,
+    Generates in-character responses to scammer messages using Mistral,
     with strict validation and fallback mechanisms to ensure the persona
     never breaks character.
 
     Attributes:
-        llm_client: A google.generativeai.GenerativeModel instance (or None for
+        llm_client: A mistralai.Mistral client instance (or None for
             fallback-only mode).
         system_prompt: The persona system prompt defining character behavior.
         fallback_responses: Pool of pre-written in-character fallback responses.
@@ -351,7 +351,7 @@ class PersonaEngine:
         """Initialize the PersonaEngine with LLM client and configuration.
 
         Args:
-            llm_client: A google.generativeai.GenerativeModel instance used for
+            llm_client: A mistralai.Mistral client instance used for
                 response generation. If None, the engine operates in fallback-only
                 mode, always returning pre-written responses.
             system_prompt: The persona system prompt. Defaults to the
@@ -391,10 +391,10 @@ class PersonaEngine:
             truncated_history = self._truncate_history(conversation_history)
 
             # Build the prompt deterministically
-            prompt_text = self._build_prompt(truncated_history, sanitized_message)
+            messages = self._build_prompt(truncated_history, sanitized_message)
 
             # Attempt LLM generation with 10s timeout
-            response_text = self._call_llm(prompt_text, timeout=10.0)
+            response_text = self._call_llm(messages, timeout=10.0)
 
             if response_text is None:
                 logger.warning("LLM returned None, falling back to pre-written response")
@@ -504,41 +504,42 @@ class PersonaEngine:
         self,
         truncated_history: list[ChatMessage],
         current_message: str,
-    ) -> str:
-        """Build the LLM prompt deterministically for Gemini.
+    ) -> list[dict[str, str]]:
+        """Build the LLM prompt as a messages list for Mistral.
 
         Construction: system_prompt + truncated_history + current_message.
         This follows the Character Lock convention for deterministic prompt
-        construction. For Gemini, we combine system prompt and conversation
-        history into a single text prompt.
+        construction.
 
         Args:
             truncated_history: Truncated conversation history.
             current_message: The current sanitized scammer message.
 
         Returns:
-            A formatted prompt string for Gemini's generate_content().
+            A list of message dicts for Mistral's chat.complete().
         """
-        parts: list[str] = [self.system_prompt, "\n\n--- Conversation History ---\n"]
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": self.system_prompt},
+        ]
 
         for msg in truncated_history:
             if msg.sender == "scammer":
-                parts.append(f"Scammer: {msg.content}\n")
+                messages.append({"role": "user", "content": msg.content})
             elif msg.sender == "persona":
-                parts.append(f"Dorothy: {msg.content}\n")
+                messages.append({"role": "assistant", "content": msg.content})
 
-        parts.append(f"\nScammer: {current_message}\nDorothy:")
+        messages.append({"role": "user", "content": current_message})
 
-        return "".join(parts)
+        return messages
 
-    def _call_llm(self, prompt: str, timeout: float = 10.0) -> Optional[str]:
-        """Call the Gemini LLM client with a timeout.
+    def _call_llm(self, messages: list[dict[str, str]], timeout: float = 10.0) -> Optional[str]:
+        """Call the Mistral LLM client with a timeout.
 
         Uses a thread pool executor to enforce the 10-second timeout on
-        the synchronous generate_content() call.
+        the synchronous chat.complete() call.
 
         Args:
-            prompt: The full prompt string to send to Gemini.
+            messages: The messages list to send to Mistral.
             timeout: Maximum time in seconds to wait for a response.
 
         Returns:
@@ -551,63 +552,41 @@ class PersonaEngine:
             return None
 
         try:
-            future = self._executor.submit(self._generate_content, prompt)
+            future = self._executor.submit(self._generate_content, messages)
             result = future.result(timeout=timeout)
             return result
         except FuturesTimeoutError:
-            logger.warning("Gemini call timed out after %.1fs", timeout)
+            logger.warning("Mistral call timed out after %.1fs", timeout)
             raise TimeoutError(f"LLM call timed out after {timeout}s")
         except Exception as e:
             error_str = str(e).lower()
             if "timeout" in error_str or "timed out" in error_str:
                 raise TimeoutError(f"LLM call timed out: {e}") from e
-            logger.error("Gemini call failed: %s", e)
+            logger.error("Mistral call failed: %s", e)
             return None
 
-    def _generate_content(self, prompt: str) -> Optional[str]:
-        """Execute the actual Gemini generate_content call.
+    def _generate_content(self, messages: list[dict[str, str]]) -> Optional[str]:
+        """Execute the Mistral chat.complete() call.
 
         Separated into its own method to run inside the thread pool executor.
-        Supports both the old google-generativeai SDK (GenerativeModel) and
-        the new google-genai SDK (Client).
 
         Args:
-            prompt: The full prompt string.
+            messages: The messages list for Mistral.
 
         Returns:
             The response text or None if extraction failed.
         """
         try:
-            # New google-genai SDK: client.models.generate_content()
-            if hasattr(self.llm_client, "models"):
-                response = self.llm_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=prompt,
-                )
-                if response and hasattr(response, "text"):
-                    return response.text
-                return None
-
-            # Old google-generativeai SDK: model.generate_content()
-            response = self.llm_client.generate_content(prompt)
-
-            # Extract text from Gemini response
-            if response and hasattr(response, "text"):
-                return response.text
-            # Handle candidates-based response structure
-            if (
-                response
-                and hasattr(response, "candidates")
-                and response.candidates
-            ):
-                candidate = response.candidates[0]
-                if hasattr(candidate, "content") and candidate.content.parts:
-                    return candidate.content.parts[0].text
-
-            logger.warning("Gemini response had no extractable text")
+            response = self.llm_client.chat.complete(
+                model="mistral-small-latest",
+                messages=messages,
+            )
+            if response and response.choices:
+                return response.choices[0].message.content
+            logger.warning("Mistral response had no extractable text")
             return None
         except Exception as e:
-            logger.error("Error extracting Gemini response text: %s", e)
+            logger.error("Error calling Mistral: %s", e)
             return None
 
     def _enforce_word_bounds(self, response: str) -> str:

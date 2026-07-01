@@ -350,7 +350,7 @@ class TestThresholdRoutingCorrectness:
                 f"got {result.determining_stage}"
             )
             # LLM should NOT have been called
-            mock_llm.generate_content.assert_not_called()
+            mock_llm.chat.complete.assert_not_called()
 
     @given(
         patterns=pattern_list_strategy,
@@ -376,8 +376,10 @@ class TestThresholdRoutingCorrectness:
         # Mock LLM that returns a valid JSON response
         mock_llm = MagicMock()
         mock_response = MagicMock()
-        mock_response.text = '{"verdict": "scam", "reasoning": "test reasoning"}'
-        mock_llm.generate_content.return_value = mock_response
+        mock_choice = MagicMock()
+        mock_choice.message.content = '{"verdict": "scam", "reasoning": "test reasoning"}'
+        mock_response.choices = [mock_choice]
+        mock_llm.chat.complete.return_value = mock_response
 
         classifier = ScamClassifier(
             patterns=patterns,
@@ -404,7 +406,7 @@ class TestThresholdRoutingCorrectness:
 
         if stage_1_score < confidence_threshold:
             # LLM should have been called
-            mock_llm.generate_content.assert_called_once()
+            mock_llm.chat.complete.assert_called_once()
             assert result.determining_stage == "stage_2", (
                 f"Expected stage_2 when score {stage_1_score} < "
                 f"threshold {confidence_threshold}, "

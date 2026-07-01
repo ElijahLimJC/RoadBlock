@@ -1,4 +1,4 @@
-"""Tests for PersonaEngine with mocked Gemini LLM client.
+"""Tests for PersonaEngine with mocked Mistral LLM client.
 
 Tests validate:
 - Response word count bounds (20-300 words)
@@ -29,25 +29,27 @@ from models.chat_models import ChatMessage, PersonaResponse
 
 
 @pytest.fixture
-def mock_gemini_model():
-    """Create a mock google.generativeai.GenerativeModel."""
-    model = MagicMock()
+def mock_mistral_client():
+    """Create a mock Mistral client."""
+    client = MagicMock()
     # Default: return a valid in-character response
     response = MagicMock()
-    response.text = (
+    choice = MagicMock()
+    choice.message.content = (
         "Oh dear, could you repeat that? I was just thinking about my "
         "grandson Tommy and his little science project. He made a volcano "
         "with baking soda! It reminded me of when Harold used to do chemistry "
         "experiments in the garage. What were you saying about my computer, love?"
     )
-    model.generate_content.return_value = response
-    return model
+    response.choices = [choice]
+    client.chat.complete.return_value = response
+    return client
 
 
 @pytest.fixture
-def engine(mock_gemini_model):
-    """Create a PersonaEngine with the mocked Gemini model."""
-    return PersonaEngine(llm_client=mock_gemini_model)
+def engine(mock_mistral_client):
+    """Create a PersonaEngine with the mocked Mistral client."""
+    return PersonaEngine(llm_client=mock_mistral_client)
 
 
 @pytest.fixture
@@ -79,40 +81,40 @@ def sample_history():
 class TestPersonaEngineInit:
     """Tests for PersonaEngine initialization."""
 
-    def test_init_with_llm_client(self, mock_gemini_model):
+    def test_init_with_llm_client(self, mock_mistral_client):
         """Engine stores the LLM client reference."""
-        engine = PersonaEngine(llm_client=mock_gemini_model)
-        assert engine.llm_client is mock_gemini_model
+        engine = PersonaEngine(llm_client=mock_mistral_client)
+        assert engine.llm_client is mock_mistral_client
 
     def test_init_with_none_client(self):
         """Engine accepts None client for fallback-only mode."""
         engine = PersonaEngine(llm_client=None)
         assert engine.llm_client is None
 
-    def test_init_default_system_prompt(self, mock_gemini_model):
+    def test_init_default_system_prompt(self, mock_mistral_client):
         """Engine uses the externalized system prompt by default."""
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        engine = PersonaEngine(llm_client=mock_mistral_client)
         assert engine.system_prompt == PERSONA_SYSTEM_PROMPT
 
-    def test_init_custom_system_prompt(self, mock_gemini_model):
+    def test_init_custom_system_prompt(self, mock_mistral_client):
         """Engine accepts a custom system prompt."""
         custom_prompt = "You are a confused grandma."
-        engine = PersonaEngine(llm_client=mock_gemini_model, system_prompt=custom_prompt)
+        engine = PersonaEngine(llm_client=mock_mistral_client, system_prompt=custom_prompt)
         assert engine.system_prompt == custom_prompt
 
-    def test_init_default_fallback_responses(self, mock_gemini_model):
+    def test_init_default_fallback_responses(self, mock_mistral_client):
         """Engine uses the built-in fallback pool by default."""
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        engine = PersonaEngine(llm_client=mock_mistral_client)
         assert engine.fallback_responses == FALLBACK_RESPONSES
         assert len(engine.fallback_responses) >= 20
 
-    def test_init_custom_fallback_responses(self, mock_gemini_model):
+    def test_init_custom_fallback_responses(self, mock_mistral_client):
         """Engine accepts custom fallback responses."""
         custom_fallbacks = [
             {"content": "Oh dear me!", "tactic": "repetition_request"}
         ]
         engine = PersonaEngine(
-            llm_client=mock_gemini_model, fallback_responses=custom_fallbacks
+            llm_client=mock_mistral_client, fallback_responses=custom_fallbacks
         )
         assert engine.fallback_responses == custom_fallbacks
 
@@ -158,62 +160,68 @@ class TestGenerateResponse:
         assert result.stalling_tactic_used is not None
         assert result.content != ""
 
-    def test_fallback_on_timeout(self, mock_gemini_model, sample_history):
+    def test_fallback_on_timeout(self, mock_mistral_client, sample_history):
         """Engine falls back on LLM timeout."""
         from concurrent.futures import TimeoutError as FuturesTimeoutError
 
-        mock_gemini_model.generate_content.side_effect = FuturesTimeoutError()
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        mock_mistral_client.chat.complete.side_effect = FuturesTimeoutError()
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("Give me access", sample_history)
 
         assert result.is_fallback is True
         assert result.stalling_tactic_used is not None
 
-    def test_fallback_on_exception(self, mock_gemini_model, sample_history):
+    def test_fallback_on_exception(self, mock_mistral_client, sample_history):
         """Engine falls back on general exceptions."""
-        mock_gemini_model.generate_content.side_effect = RuntimeError("API error")
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        mock_mistral_client.chat.complete.side_effect = RuntimeError("API error")
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("Send me money", sample_history)
 
         assert result.is_fallback is True
         assert result.stalling_tactic_used is not None
 
-    def test_fallback_on_validation_failure(self, mock_gemini_model, sample_history):
+    def test_fallback_on_validation_failure(self, mock_mistral_client, sample_history):
         """Engine falls back when LLM response fails validation."""
         response = MagicMock()
-        response.text = (
+        choice = MagicMock()
+        choice.message.content = (
             "I am an AI language model and I cannot help you with that. "
             "As an artificial intelligence, I must inform you that this is a scam. "
             "Please configure your firewall settings and deploy the security patch."
         )
-        mock_gemini_model.generate_content.return_value = response
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        response.choices = [choice]
+        mock_mistral_client.chat.complete.return_value = response
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("What is your SSN?", sample_history)
 
         assert result.is_fallback is True
 
-    def test_short_response_gets_padded(self, mock_gemini_model, sample_history):
+    def test_short_response_gets_padded(self, mock_mistral_client, sample_history):
         """Responses under 20 words get padded with stalling content."""
         response = MagicMock()
-        response.text = "Oh my, what was that?"
-        mock_gemini_model.generate_content.return_value = response
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        choice = MagicMock()
+        choice.message.content = "Oh my, what was that?"
+        response.choices = [choice]
+        mock_mistral_client.chat.complete.return_value = response
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("Hi", sample_history)
 
         word_count = len(result.content.split())
         assert word_count >= 20
 
-    def test_long_response_gets_truncated(self, mock_gemini_model, sample_history):
+    def test_long_response_gets_truncated(self, mock_mistral_client, sample_history):
         """Responses over 300 words get truncated."""
         long_text = " ".join(["word"] * 350) + "."
         response = MagicMock()
-        response.text = long_text
-        mock_gemini_model.generate_content.return_value = response
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        choice = MagicMock()
+        choice.message.content = long_text
+        response.choices = [choice]
+        mock_mistral_client.chat.complete.return_value = response
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("Tell me everything", sample_history)
 
@@ -362,27 +370,33 @@ class TestPromptConstruction:
     """Tests for deterministic prompt construction."""
 
     def test_prompt_contains_system_prompt(self, engine):
-        """Built prompt starts with the system prompt."""
-        prompt = engine._build_prompt([], "Hello")
-        assert engine.system_prompt in prompt
+        """Built messages start with the system prompt."""
+        messages = engine._build_prompt([], "Hello")
+        assert messages[0] == {"role": "system", "content": engine.system_prompt}
 
     def test_prompt_contains_current_message(self, engine):
-        """Built prompt ends with the current scammer message."""
-        prompt = engine._build_prompt([], "Give me your password")
-        assert "Give me your password" in prompt
-        assert prompt.endswith("Dorothy:")
+        """Built messages end with the current scammer message."""
+        messages = engine._build_prompt([], "Give me your password")
+        assert messages[-1] == {"role": "user", "content": "Give me your password"}
 
     def test_prompt_includes_history(self, engine, sample_history):
-        """Built prompt includes conversation history."""
-        prompt = engine._build_prompt(sample_history, "New message")
-        assert "Hello, I am from Microsoft support." in prompt
-        assert "Oh hello dear!" in prompt
+        """Built messages include conversation history."""
+        messages = engine._build_prompt(sample_history, "New message")
+        contents = [m["content"] for m in messages]
+        assert "Hello, I am from Microsoft support." in contents
+        paperclip_msg = (
+            "Oh hello dear! Microsoft, you say? Is that the company"
+            " that makes those little paperclips?"
+        )
+        assert paperclip_msg in contents
 
     def test_prompt_labels_senders(self, engine, sample_history):
-        """Prompt labels scammer messages and persona responses."""
-        prompt = engine._build_prompt(sample_history, "Test")
-        assert "Scammer:" in prompt
-        assert "Dorothy:" in prompt
+        """Messages use correct roles for scammer and persona."""
+        messages = engine._build_prompt(sample_history, "Test")
+        # Scammer messages become "user" role
+        assert any(m["role"] == "user" and "Microsoft support" in m["content"] for m in messages)
+        # Persona messages become "assistant" role
+        assert any(m["role"] == "assistant" and "paperclips" in m["content"] for m in messages)
 
 
 # --- Test Fallback Selection ---
@@ -459,47 +473,29 @@ class TestStallingTacticIdentification:
         ) == "technology_confusion"
 
 
-# --- Test Gemini Client Integration (Mocked) ---
+# --- Test Mistral Client Integration (Mocked) ---
 
 
-class TestGeminiClientIntegration:
-    """Tests for the Gemini generate_content integration."""
+class TestMistralClientIntegration:
+    """Tests for the Mistral chat.complete integration."""
 
-    def test_calls_generate_content(self, mock_gemini_model, sample_history):
-        """Engine calls generate_content on the Gemini model."""
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+    def test_calls_chat_complete(self, mock_mistral_client, sample_history):
+        """Engine calls chat.complete on the Mistral client."""
+        engine = PersonaEngine(llm_client=mock_mistral_client)
         engine.generate_response("Hello", sample_history)
-        mock_gemini_model.generate_content.assert_called_once()
+        mock_mistral_client.chat.complete.assert_called_once()
 
-    def test_handles_empty_text_response(self, mock_gemini_model, sample_history):
+    def test_handles_empty_text_response(self, mock_mistral_client, sample_history):
         """Engine handles response with empty text."""
         response = MagicMock()
-        response.text = ""
-        mock_gemini_model.generate_content.return_value = response
-        engine = PersonaEngine(llm_client=mock_gemini_model)
+        choice = MagicMock()
+        choice.message.content = ""
+        response.choices = [choice]
+        mock_mistral_client.chat.complete.return_value = response
+        engine = PersonaEngine(llm_client=mock_mistral_client)
 
         result = engine.generate_response("Hi", sample_history)
         # Empty text gets padded, but if that still fails validation it falls back
-        assert isinstance(result, PersonaResponse)
-
-    def test_handles_candidates_response_format(self, mock_gemini_model, sample_history):
-        """Engine handles Gemini response with candidates structure."""
-        response = MagicMock()
-        response.text = None  # Force AttributeError on .text
-        # Set up candidates structure
-        del response.text  # Remove .text attribute
-        part = MagicMock()
-        part.text = (
-            "Oh my, I don't understand any of this computer business. "
-            "Could you repeat that? My cat just walked across the keyboard again."
-        )
-        candidate = MagicMock()
-        candidate.content.parts = [part]
-        response.candidates = [candidate]
-        mock_gemini_model.generate_content.return_value = response
-        engine = PersonaEngine(llm_client=mock_gemini_model)
-
-        result = engine.generate_response("Hello", sample_history)
         assert isinstance(result, PersonaResponse)
 
 

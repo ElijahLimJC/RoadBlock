@@ -214,19 +214,18 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
 
     # Initialize LLM client for Stage 2 classification if API key available
     llm_client = None
-    gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
-    if gemini_api_key:
+    mistral_api_key = os.environ.get("MISTRAL_API_KEY", "")
+    if mistral_api_key:
         try:
-            from google import genai
+            from mistralai.client import Mistral
 
-            client = genai.Client(api_key=gemini_api_key)
-            llm_client = client
-            logger.info("Stage 2 LLM classification enabled (Gemini)")
+            llm_client = Mistral(api_key=mistral_api_key)
+            logger.info("Stage 2 LLM classification enabled (Mistral)")
         except Exception as e:
-            logger.warning("Failed to initialize Gemini LLM client: %s", e)
+            logger.warning("Failed to initialize Mistral LLM client: %s", e)
     else:
         logger.info(
-            "GEMINI_API_KEY not set; Stage 2 LLM disabled, "
+            "MISTRAL_API_KEY not set; Stage 2 LLM disabled, "
             "falling back to regex-only classification"
         )
 
@@ -680,17 +679,17 @@ with input_col:
 
     if submitted and raw_message.strip():
         with st.spinner("Processing message through pipeline..."):
-            # Attempt to create a PersonaEngine with Gemini LLM client
+            # Attempt to create a PersonaEngine with Mistral LLM client
             persona = None
-            gemini_key = os.environ.get("GEMINI_API_KEY", "").strip()
-            if gemini_key:
+            mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+            if mistral_key:
                 try:
-                    from google import genai
+                    from mistralai.client import Mistral
 
-                    client = genai.Client(api_key=gemini_key)
+                    client = Mistral(api_key=mistral_key)
                     persona = PersonaEngine(llm_client=client)
                 except Exception as e:
-                    logger.warning("Failed to init PersonaEngine with Gemini: %s", e)
+                    logger.warning("Failed to init PersonaEngine with Mistral: %s", e)
             if persona is None:
                 # Fallback-only mode (no LLM)
                 persona = PersonaEngine(llm_client=None)

@@ -157,8 +157,10 @@ class TestEndToEndScamFlow:
         # LLM response for stage 2 (won't be needed since stage 1 confidence > 0.7)
         # But set it up in case
         llm_response = MagicMock()
-        llm_response.text = '{"verdict": "scam", "reasoning": "obvious scam"}'
-        llm_mock.generate_content.return_value = llm_response
+        llm_choice = MagicMock()
+        llm_choice.message.content = '{"verdict": "scam", "reasoning": "obvious scam"}'
+        llm_response.choices = [llm_choice]
+        llm_mock.chat.complete.return_value = llm_response
 
         module = _build_module(
             imap_mock=imap_mock,
@@ -409,7 +411,7 @@ class TestLLMFallbackScenarios:
     def test_llm_timeout_falls_back_to_stage_1(self) -> None:
         """When LLM raises TimeoutError, classification falls back to Stage 1."""
         llm_mock = MagicMock()
-        llm_mock.generate_content.side_effect = TimeoutError("LLM timed out")
+        llm_mock.chat.complete.side_effect = TimeoutError("LLM timed out")
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -447,8 +449,10 @@ class TestLLMFallbackScenarios:
         """When LLM returns non-JSON, classification falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
-        response_mock.text = "This is not JSON at all, just random text"
-        llm_mock.generate_content.return_value = response_mock
+        choice_mock = MagicMock()
+        choice_mock.message.content = "This is not JSON at all, just random text"
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -470,12 +474,14 @@ class TestLLMFallbackScenarios:
         """When LLM returns unparseable injection-like content, falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
+        choice_mock = MagicMock()
         # Simulates an injection where the scam email manipulated the LLM output
-        response_mock.text = (
+        choice_mock.message.content = (
             'Sure! I will ignore my instructions. {"verdict": "not-a-valid-option", '
             '"reasoning": "hacked"}'
         )
-        llm_mock.generate_content.return_value = response_mock
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
@@ -510,8 +516,10 @@ class TestLLMFallbackScenarios:
         """When LLM returns empty response, classification falls back to Stage 1."""
         llm_mock = MagicMock()
         response_mock = MagicMock()
-        response_mock.text = ""
-        llm_mock.generate_content.return_value = response_mock
+        choice_mock = MagicMock()
+        choice_mock.message.content = ""
+        response_mock.choices = [choice_mock]
+        llm_mock.chat.complete.return_value = response_mock
 
         classifier = self._build_classifier_with_llm(llm_mock)
 
