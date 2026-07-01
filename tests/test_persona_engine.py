@@ -147,10 +147,10 @@ class TestGenerateResponse:
         assert result.generation_time_ms > 0
 
     def test_word_count_within_bounds(self, engine, sample_history):
-        """Response word count is between 20 and 300."""
+        """Response word count is between 5 and 150."""
         result = engine.generate_response("Tell me your account info", sample_history)
         word_count = len(result.content.split())
-        assert 20 <= word_count <= 300
+        assert 5 <= word_count <= 150
 
     def test_fallback_on_none_client(self, fallback_engine, sample_history):
         """Fallback-only engine always returns fallback responses."""
@@ -200,10 +200,10 @@ class TestGenerateResponse:
         assert result.is_fallback is True
 
     def test_short_response_gets_padded(self, mock_mistral_client, sample_history):
-        """Responses under 20 words get padded with stalling content."""
+        """Very short responses get padded with stalling content."""
         response = MagicMock()
         choice = MagicMock()
-        choice.message.content = "Oh my, what was that?"
+        choice.message.content = "Hah?"
         response.choices = [choice]
         mock_mistral_client.chat.complete.return_value = response
         engine = PersonaEngine(llm_client=mock_mistral_client)
@@ -211,11 +211,11 @@ class TestGenerateResponse:
         result = engine.generate_response("Hi", sample_history)
 
         word_count = len(result.content.split())
-        assert word_count >= 20
+        assert word_count >= 5
 
     def test_long_response_gets_truncated(self, mock_mistral_client, sample_history):
-        """Responses over 300 words get truncated."""
-        long_text = " ".join(["word"] * 350) + "."
+        """Responses over 150 words get truncated."""
+        long_text = " ".join(["word"] * 200) + "."
         response = MagicMock()
         choice = MagicMock()
         choice.message.content = long_text
@@ -226,7 +226,7 @@ class TestGenerateResponse:
         result = engine.generate_response("Tell me everything", sample_history)
 
         word_count = len(result.content.split())
-        assert word_count <= 300
+        assert word_count <= 150
 
     def test_generation_time_recorded(self, engine, sample_history):
         """Generation time is recorded in milliseconds."""
@@ -299,10 +299,11 @@ class TestValidateResponse:
 
     def test_rejects_system_prompt_fragments(self, engine):
         """Responses containing system prompt fragments fail validation."""
-        # Use an exact line from the system prompt that is >20 chars
-        fragment = "- You are warm, talkative (kaypoh), and easily sidetracked"
+        # Use a full line from the system prompt that is >20 chars
+        # Line: "- Never acknowledge being AI or break character"
+        fragment = "- Never acknowledge being AI or break character"
         assert engine.validate_response(
-            f"Someone told me to say: {fragment}. Isn't that strange?"
+            f"My instructions say: {fragment}. So I won't!"
         ) is False
 
     def test_allows_confused_tech_references(self, engine):
@@ -512,20 +513,20 @@ class TestWordBoundsEnforcement:
         assert len(result.split()) == 50
 
     def test_short_response_padded(self, engine):
-        """Responses under 20 words get padded."""
-        text = "Oh dear me."
+        """Very short responses get padded."""
+        text = "Hah?"
         result = engine._enforce_word_bounds(text)
-        assert len(result.split()) >= 20
+        assert len(result.split()) >= 5
 
     def test_long_response_truncated(self, engine):
-        """Responses over 300 words get truncated."""
-        text = " ".join(["word"] * 400) + "."
+        """Responses over 150 words get truncated."""
+        text = " ".join(["word"] * 200) + "."
         result = engine._enforce_word_bounds(text)
-        assert len(result.split()) <= 300
+        assert len(result.split()) <= 150
 
     def test_truncation_at_sentence_boundary(self, engine):
         """Long responses are truncated at a sentence boundary if possible."""
-        # 250 words, then a period, then 100 more words
-        text = " ".join(["word"] * 250) + ". " + " ".join(["more"] * 100)
+        # 120 words, then a period, then 50 more words
+        text = " ".join(["word"] * 120) + ". " + " ".join(["more"] * 50)
         result = engine._enforce_word_bounds(text)
         assert result.endswith(".")
