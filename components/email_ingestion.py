@@ -198,6 +198,12 @@ class EmailIngestionModule:
                 staged.extend(ioc_list)
                 state_dict["_staged_iocs"] = staged
 
+            elif result_type == "conversation_message":
+                # Stage messages for merging into top-level conversation_history
+                staged_msgs = state_dict.get("_staged_messages", [])
+                staged_msgs.append(result["data"])
+                state_dict["_staged_messages"] = staged_msgs
+
             elif result_type == "counters":
                 state_dict["connection_status"] = result.get(
                     "connection_status", state_dict.get("connection_status", "disconnected")
@@ -472,10 +478,11 @@ class EmailIngestionModule:
         Steps:
         1. Run Safety Filter scan on email body
         2. If blocked (>=80% injection tokens): call _handle_blocked_message
-        3. Generate persona response with thread context
-        4. Queue outbound response immediately after generation
-        5. Extract IoCs via Threat Parser (best-effort, isolated)
-        6. Update thread (best-effort, isolated)
+        3. Update thread first (so persona response can append)
+        4. Generate persona response with thread context
+        5. Enqueue conversation messages for dashboard display
+        6. Queue outbound response immediately after generation
+        7. Extract IoCs via Threat Parser (best-effort, isolated)
 
         Args:
             email_msg: The confirmed scam email.
@@ -493,7 +500,17 @@ class EmailIngestionModule:
                 self._handle_blocked_message(email_msg)
                 return
 
-            # Step 3: Generate persona response with thread context
+            # Step 3: Update thread FIRST so it exists for persona append
+            try:
+                self._update_thread(email_msg)
+            except Exception as e:
+                logger.warning(
+                    "Thread update failed for email from %s: %s",
+                    email_msg.sender,
+                    e,
+                )
+
+            # Step 4: Generate persona response with thread context
             thread_history = self._get_thread_history(email_msg.sender)
             response_content = self._generate_persona_response(
                 scan_result.sanitized_content, thread_history
@@ -505,7 +522,17 @@ class EmailIngestionModule:
                     {"sender": "persona", "content": response_content}
                 )
 
-            # Step 4: Queue outbound response immediately after generation
+            # Step 5: Enqueue conversation messages for dashboard display
+            self._enqueue_result("conversation_message", {
+                "sender": "scammer",
+                "content": scan_result.sanitized_content,
+            })
+            self._enqueue_result("conversation_message", {
+                "sender": "persona",
+                "content": response_content,
+            })
+
+            # Step 6: Queue outbound response immediately after generation
             outbound = OutboundEmail(
                 to_address=email_msg.reply_to or email_msg.sender,
                 subject=self._smtp_client.compose_reply_subject(email_msg.subject),
@@ -514,7 +541,7 @@ class EmailIngestionModule:
             )
             self._enqueue_result("outbound", outbound.model_dump())
 
-            # Step 5: Extract IoCs via Threat Parser (best-effort)
+            # Step 7: Extract IoCs via Threat Parser (best-effort)
             try:
                 extraction_result = self._run_extraction(
                     self._threat_parser, email_msg.body
@@ -534,16 +561,6 @@ class EmailIngestionModule:
             except Exception as e:
                 logger.warning(
                     "IoC extraction failed for email from %s: %s",
-                    email_msg.sender,
-                    e,
-                )
-
-            # Step 6: Update thread (best-effort)
-            try:
-                self._update_thread(email_msg)
-            except Exception as e:
-                logger.warning(
-                    "Thread update failed for email from %s: %s",
                     email_msg.sender,
                     e,
                 )
@@ -612,6 +629,7 @@ class EmailIngestionModule:
     ) -> str:
         """Generate a persona response using the PersonaEngine.
 
+        Attempts to use the Mistral LLM client if MISTRAL_API_KEY is set.
         Falls back to the default blocked response if PersonaEngine
         initialization or generation fails.
 
@@ -625,9 +643,25 @@ class EmailIngestionModule:
         from models.chat_models import ChatMessage
 
         try:
+            import os
+
+            import httpx
+
             from components.persona_engine import PersonaEngine
 
-            persona = PersonaEngine(llm_client=None)
+            # Attempt to create LLM client for persona generation
+            llm_client = None
+            mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+            if mistral_key:
+                try:
+                    from mistralai.client import Mistral
+
+                    http_client = httpx.Client(verify=False)
+                    llm_client = Mistral(api_key=mistral_key, client=http_client)
+                except Exception as e:
+                    logger.warning("Failed to init Mistral for persona: %s", e)
+
+            persona = PersonaEngine(llm_client=llm_client)
 
             # Build conversation history from thread
             history: list[ChatMessage] = []

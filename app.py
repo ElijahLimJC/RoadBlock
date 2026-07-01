@@ -594,6 +594,19 @@ if st.session_state.get("email_ingestion_module") is not None:
         st.session_state["new_ioc_count"] = (
             st.session_state.get("new_ioc_count", 0) + len(_staged_iocs)
         )
+
+    # Merge staged conversation messages into top-level conversation_history
+    _staged_msgs = st.session_state.email_ingestion.pop("_staged_messages", [])
+    if _staged_msgs:
+        from datetime import datetime
+        for _msg_data in _staged_msgs:
+            _chat_msg = ChatMessage(
+                sender=_msg_data.get("sender", "scammer"),
+                content=_msg_data.get("content", ""),
+                timestamp=datetime.utcnow(),
+            )
+            st.session_state["conversation_history"].append(_chat_msg)
+
     # Use module's internal state for connection status (avoid NOOP race with bg thread)
     if _email_module._polling and _email_module._consecutive_failures == 0:
         st.session_state.email_ingestion["connection_status"] = "connected"
