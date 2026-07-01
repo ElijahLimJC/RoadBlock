@@ -345,37 +345,33 @@ class TestBlockedMessageFlow:
 
         extract_called_with: list[str] = []
 
-        threat_instance = MagicMock()
         extraction_result = MagicMock()
         extraction_result.iocs = ["some_ioc"]
 
-        async def mock_extract(body: str) -> Any:
+        def mock_extract(body: str) -> Any:
             extract_called_with.append(body)
             return extraction_result
 
-        threat_instance.extract_iocs = mock_extract
+        # Patch the instance's threat_parser directly
+        module._threat_parser.extract_iocs = mock_extract
 
-        with patch(
-            "components.threat_parser.ThreatParser",
-            return_value=threat_instance,
-        ):
-            raw_bytes = _make_injection_email_bytes()
-            email_msg = module._parse_email(raw_bytes)
-            assert email_msg is not None
+        raw_bytes = _make_injection_email_bytes()
+        email_msg = module._parse_email(raw_bytes)
+        assert email_msg is not None
 
-            # Force classification as scam
-            mock_classification = ClassificationResult(
-                verdict="scam",
-                confidence=0.9,
-                determining_stage="stage_1",
-                matched_patterns=["urgency"],
-                sender=email_msg.sender,
-                subject=email_msg.subject,
-            )
-            module._scam_classifier = MagicMock()
-            module._scam_classifier.classify.return_value = mock_classification
+        # Force classification as scam
+        mock_classification = ClassificationResult(
+            verdict="scam",
+            confidence=0.9,
+            determining_stage="stage_1",
+            matched_patterns=["urgency"],
+            sender=email_msg.sender,
+            subject=email_msg.subject,
+        )
+        module._scam_classifier = MagicMock()
+        module._scam_classifier.classify.return_value = mock_classification
 
-            module.process_email(email_msg)
+        module.process_email(email_msg)
 
         # Verify ThreatParser.extract_iocs was called with the raw body
         assert len(extract_called_with) == 1

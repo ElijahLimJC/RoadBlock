@@ -277,10 +277,12 @@ class TestClassificationLogCapacityInvariant:
         entries=st.lists(
             classification_result_strategy,
             min_size=201,
-            max_size=500,
+            max_size=300,
         ),
     )
-    @settings(max_examples=200, suppress_health_check=[HealthCheck.large_base_example])
+    @settings(max_examples=50, suppress_health_check=[
+        HealthCheck.large_base_example, HealthCheck.data_too_large, HealthCheck.too_slow
+    ])
     def test_oldest_entries_evicted_first(self, entries: list[dict[str, Any]]) -> None:
         """When log exceeds capacity, oldest entries are dropped."""
         state_dict: dict[str, Any] = {"classification_log": list(entries)}

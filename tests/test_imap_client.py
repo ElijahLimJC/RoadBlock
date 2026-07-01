@@ -111,6 +111,9 @@ class TestFetchUnread:
         mock_ssl_cls.return_value = mock_conn
 
         client.connect()
+        # Pre-set baseline so first fetch_unread returns messages
+        client._baseline_set = True
+        client._baseline_uid = 0
         messages = client.fetch_unread()
 
         assert len(messages) == 3
@@ -155,6 +158,9 @@ class TestFetchUnread:
         mock_ssl_cls.return_value = mock_conn
 
         client.connect()
+        # Pre-set baseline so first fetch_unread returns messages
+        client._baseline_set = True
+        client._baseline_uid = 0
         messages = client.fetch_unread()
 
         assert len(messages) == 1
