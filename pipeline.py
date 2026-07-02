@@ -579,6 +579,15 @@ def flush_email_ingestion_state() -> None:
             )
             st.session_state["conversation_history"].append(_chat_msg)
 
+    # Apply pending turn updates to stalling metrics
+    _pending_turns = st.session_state.email_ingestion.pop("_pending_turns", 0)
+    if _pending_turns > 0:
+        from components.stalling_tracker import StallingTracker
+
+        _tracker = StallingTracker()
+        for _ in range(_pending_turns):
+            _tracker.record_turn(st.session_state)
+
     # Use module's internal state for connection status
     if _email_module._polling and _email_module._consecutive_failures == 0:
         st.session_state.email_ingestion["connection_status"] = "connected"
