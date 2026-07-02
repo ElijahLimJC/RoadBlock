@@ -42,6 +42,17 @@ if st.session_state.get("email_ingestion_module") is not None:
             )
             st.session_state["conversation_history"].append(_chat_msg)
 
+    # Apply pending turn updates to stalling metrics
+    _pending_turns = st.session_state.email_ingestion.pop("_pending_turns", 0)
+    if _pending_turns > 0:
+        from datetime import datetime
+
+        from components.stalling_tracker import StallingTracker
+
+        _tracker = StallingTracker()
+        for _ in range(_pending_turns):
+            _tracker.record_turn(st.session_state)
+
     # Merge staged IoCs
     _staged_iocs = st.session_state.email_ingestion.pop("_staged_iocs", [])
     if _staged_iocs:

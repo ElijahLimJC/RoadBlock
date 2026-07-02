@@ -204,6 +204,11 @@ class EmailIngestionModule:
                 staged_msgs.append(result["data"])
                 state_dict["_staged_messages"] = staged_msgs
 
+            elif result_type == "metrics_update":
+                # Signal a turn was completed for stalling metrics
+                turns = state_dict.get("_pending_turns", 0)
+                state_dict["_pending_turns"] = turns + 1
+
             elif result_type == "counters":
                 state_dict["connection_status"] = result.get(
                     "connection_status", state_dict.get("connection_status", "disconnected")
@@ -655,6 +660,9 @@ class EmailIngestionModule:
                 "content": response_content,
             })
 
+            # Step 5.5: Record turn for stalling metrics
+            self._enqueue_result("metrics_update", {"action": "record_turn"})
+
             # Step 6: Queue outbound response immediately after generation
             logger.info("[PIPELINE] Step 6: Queuing outbound email to %s",
                         email_msg.reply_to or email_msg.sender)
@@ -721,6 +729,9 @@ class EmailIngestionModule:
                 email_msg.sender,
                 e,
             )
+        finally:
+            # Sync counters immediately so UI updates without waiting for next poll
+            self._enqueue_counter_update()
 
     def _handle_blocked_message(self, email_msg: EmailMessage) -> None:
         """Handle an email that was fully blocked by the Safety Filter.

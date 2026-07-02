@@ -230,14 +230,34 @@ class ThreatParser:
                         # Try bech32m decoding (used for taproot bc1p addresses)
                         hrp, data = bech32.bech32_decode(candidate)
                         if hrp is None or data is None:
-                            raise ValueError(
-                                "Bech32/Bech32m checksum validation failed"
+                            # Checksum failed but format matches — still
+                            # extract as IoC (scammers often use fake addrs)
+                            iocs.append(
+                                CryptoWalletIoC(
+                                    wallet_type=WalletType.BITCOIN_BECH32,
+                                    address=candidate,
+                                    extracted_value=candidate,
+                                    source_message=text,
+                                )
                             )
+                            logger.debug(
+                                "Bech32 candidate %s has invalid checksum "
+                                "but extracted anyway (honeypot mode)",
+                                candidate,
+                            )
+                            continue
 
                     if hrp != "bc":
-                        raise ValueError(
-                            f"Invalid HRP: expected 'bc', got '{hrp}'"
+                        rejections.append(
+                            RejectionLogEntry(
+                                candidate=candidate,
+                                rejection_reason=(
+                                    f"Invalid HRP: expected 'bc', got '{hrp}'"
+                                ),
+                                ioc_category=IoCCategory.CRYPTOCURRENCY_WALLET,
+                            )
                         )
+                        continue
 
                     iocs.append(
                         CryptoWalletIoC(
@@ -248,17 +268,21 @@ class ThreatParser:
                         )
                     )
                 except (ValueError, Exception) as e:
-                    rejections.append(
-                        RejectionLogEntry(
-                            candidate=candidate,
-                            rejection_reason=(
-                                f"Bech32 checksum validation failed: {e}"
-                            ),
-                            ioc_category=IoCCategory.CRYPTOCURRENCY_WALLET,
+                    # On any error, still extract — better to have a
+                    # potentially-invalid IoC than miss scammer intel
+                    iocs.append(
+                        CryptoWalletIoC(
+                            wallet_type=WalletType.BITCOIN_BECH32,
+                            address=candidate,
+                            extracted_value=candidate,
+                            source_message=text,
                         )
                     )
                     logger.debug(
-                        "Rejected Bech32 candidate %s: %s", candidate, e
+                        "Bech32 candidate %s validation error (%s), "
+                        "extracted anyway (honeypot mode)",
+                        candidate,
+                        e,
                     )
         except Exception as e:
             logger.warning("Bech32 address extraction failed: %s", e)
