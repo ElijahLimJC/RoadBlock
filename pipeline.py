@@ -476,22 +476,28 @@ def _run_extraction_pipeline(
             is_known = False
             if i < len(lookup_results):
                 is_known = lookup_results[i].is_known
-                if is_known:
-                    state["known_ioc_count"] = (
-                        state.get("known_ioc_count", 0) + 1
-                    )
-                else:
-                    state["new_ioc_count"] = (
-                        state.get("new_ioc_count", 0) + 1
-                    )
+
+            # Store IoC (deduplicates by extracted_value)
+            was_stored = _store_ioc(ioc, state)
+
+            if not was_stored:
+                # Duplicate IoC — count as known (already seen)
+                state["known_ioc_count"] = (
+                    state.get("known_ioc_count", 0) + 1
+                )
+            elif is_known:
+                # MCP confirmed as known threat intel
+                state["known_ioc_count"] = (
+                    state.get("known_ioc_count", 0) + 1
+                )
             else:
+                # New IoC — first time seen
                 state["new_ioc_count"] = (
                     state.get("new_ioc_count", 0) + 1
                 )
 
-            _store_ioc(ioc, state)
-
-            if not is_known:
+            # Generate notification only for genuinely new IoCs
+            if was_stored and not is_known:
                 try:
                     notification = notification_module.generate_notification(ioc)
                     state["notifications"].append(notification)
@@ -513,9 +519,15 @@ def _run_extraction_pipeline(
 def _store_ioc(ioc, state=None) -> None:
     """Store an extracted IoC in the appropriate session state category list.
 
+    Deduplicates by extracted_value — if the same IoC value already exists
+    in the category list, it is not added again.
+
     Args:
         ioc: A BaseIoC subclass instance to store.
         state: Session state reference (uses st.session_state if None).
+
+    Returns:
+        True if the IoC was new and stored, False if it was a duplicate.
     """
     from models.ioc_models import IoCCategory
 
@@ -524,16 +536,36 @@ def _store_ioc(ioc, state=None) -> None:
 
     iocs = state.get("iocs", {})
 
+    # Determine the target list
     if ioc.category == IoCCategory.CRYPTOCURRENCY_WALLET:
-        iocs.setdefault("cryptocurrency_wallets", []).append(ioc)
+        target_list = iocs.setdefault("cryptocurrency_wallets", [])
     elif ioc.category == IoCCategory.PHISHING_DOMAIN:
-        iocs.setdefault("phishing_domains", []).append(ioc)
+        target_list = iocs.setdefault("phishing_domains", [])
     elif ioc.category == IoCCategory.PHONE_NUMBER:
-        iocs.setdefault("phone_numbers", []).append(ioc)
+        target_list = iocs.setdefault("phone_numbers", [])
     elif ioc.category == IoCCategory.MULE_BANK_ACCOUNT:
-        iocs.setdefault("mule_bank_accounts", []).append(ioc)
+        target_list = iocs.setdefault("mule_bank_accounts", [])
+    else:
+        state["iocs"] = iocs
+        return False
 
+    # Check for duplicates by extracted_value
+    ioc_value = getattr(ioc, "extracted_value", None)
+    if ioc_value is not None:
+        existing_values = set()
+        for existing in target_list:
+            if isinstance(existing, dict):
+                existing_values.add(existing.get("extracted_value"))
+            else:
+                existing_values.add(getattr(existing, "extracted_value", None))
+        if ioc_value in existing_values:
+            # Duplicate — don't store
+            state["iocs"] = iocs
+            return False
+
+    target_list.append(ioc)
     state["iocs"] = iocs
+    return True
 
 
 def flush_email_ingestion_state() -> None:
@@ -553,20 +585,45 @@ def flush_email_ingestion_state() -> None:
     _staged_iocs = st.session_state.email_ingestion.pop("_staged_iocs", [])
     if _staged_iocs:
         _iocs_state = st.session_state.get("iocs", {})
+        _new_count = 0
+        _known_count = 0
         for _ioc_data in _staged_iocs:
             _cat = _ioc_data.get("category", "")
+            _value = _ioc_data.get("extracted_value")
+
+            # Determine target list
             if _cat == "cryptocurrency_wallet":
-                _iocs_state.setdefault("cryptocurrency_wallets", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("cryptocurrency_wallets", [])
             elif _cat == "phishing_domain":
-                _iocs_state.setdefault("phishing_domains", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("phishing_domains", [])
             elif _cat == "phone_number":
-                _iocs_state.setdefault("phone_numbers", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("phone_numbers", [])
             elif _cat == "mule_bank_account":
-                _iocs_state.setdefault("mule_bank_accounts", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("mule_bank_accounts", [])
+            else:
+                continue
+
+            # Dedup by extracted_value
+            _existing = {
+                (d.get("extracted_value") if isinstance(d, dict)
+                 else getattr(d, "extracted_value", None))
+                for d in _target
+            }
+            if _value in _existing:
+                _known_count += 1
+            else:
+                _target.append(_ioc_data)
+                _new_count += 1
+
         st.session_state["iocs"] = _iocs_state
-        st.session_state["new_ioc_count"] = (
-            st.session_state.get("new_ioc_count", 0) + len(_staged_iocs)
-        )
+        if _new_count > 0:
+            st.session_state["new_ioc_count"] = (
+                st.session_state.get("new_ioc_count", 0) + _new_count
+            )
+        if _known_count > 0:
+            st.session_state["known_ioc_count"] = (
+                st.session_state.get("known_ioc_count", 0) + _known_count
+            )
 
     # Merge staged conversation messages into top-level conversation_history
     _staged_msgs = st.session_state.email_ingestion.pop("_staged_messages", [])
