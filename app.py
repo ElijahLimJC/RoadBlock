@@ -139,18 +139,23 @@ with status_col3:
                 unsafe_allow_html=True,
             )
 
-st.divider()
-
-# --- SOC Dashboard (read-only overview) ---
-_dashboard.render(dict(st.session_state))
-
-# Show last error if any
-last_error = st.session_state.get("last_error")
-if last_error:
-    st.error(f"Last pipeline error: {last_error}")
-
 # --- Auto-refresh when email ingestion is active ---
 if st.session_state.get("email_ingestion_module") is not None:
     from streamlit_autorefresh import st_autorefresh
 
     st_autorefresh(interval=5000, limit=None, key="email_ingestion_refresh")
+
+st.divider()
+
+# --- SOC Dashboard (read-only overview) ---
+_dashboard.render(dict(st.session_state))
+
+# Show email ingestion panel on main page too
+if st.session_state.get("email_ingestion_module") is not None:
+    st.divider()
+    _dashboard.render_email_ingestion_panel(dict(st.session_state))
+
+# Show last error if any
+last_error = st.session_state.get("last_error")
+if last_error:
+    st.error(f"Last pipeline error: {last_error}")
