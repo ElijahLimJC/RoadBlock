@@ -1,9 +1,10 @@
 """Email ingestion Pydantic models for RoadBlock scam detection pipeline."""
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
-from datetime import datetime
-from typing import Literal, Optional
 import re
+from datetime import datetime, timezone
+from typing import Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class EmailMessage(BaseModel):
@@ -11,13 +12,26 @@ class EmailMessage(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    sender: str  # RFC 5322 addr-spec, max 254 chars
-    subject: str = ""  # max 998 chars
-    body: str  # non-empty after strip, max 1_000_000 chars
-    message_id: str = ""
-    reply_to: str = ""
-    date_header: str = ""
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    sender: str = Field(description="RFC 5322 addr-spec sender address")
+    subject: str = Field(
+        default="", description="Email subject line (max 998 chars)"
+    )
+    body: str = Field(
+        description="Email body text (non-empty after strip)"
+    )
+    message_id: str = Field(
+        default="", description="RFC 5322 Message-ID header"
+    )
+    reply_to: str = Field(
+        default="", description="Reply-To header address"
+    )
+    date_header: str = Field(
+        default="", description="Date header value"
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When the email was received",
+    )
 
     @field_validator("sender")
     @classmethod
@@ -43,7 +57,9 @@ class EmailMessage(BaseModel):
     def validate_body(cls, v: str) -> str:
         """Validate body is non-empty after strip and within 1,000,000 chars."""
         if not v.strip():
-            raise ValueError("Body cannot be empty after stripping whitespace")
+            raise ValueError(
+                "Body cannot be empty after stripping whitespace"
+            )
         if len(v) > 1_000_000:
             raise ValueError("Body exceeds 1,000,000 characters")
         return v
@@ -54,14 +70,29 @@ class ClassificationResult(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    verdict: Literal["scam", "not_scam"]
-    confidence: float = Field(ge=0.0, le=1.0)
-    determining_stage: Literal["stage_1", "stage_2"]
-    matched_patterns: list[str] = Field(default_factory=list)
-    llm_reasoning: str = ""
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    sender: str = ""
-    subject: str = ""
+    verdict: Literal["scam", "not_scam"] = Field(
+        description="Classification verdict"
+    )
+    confidence: float = Field(
+        ge=0.0, le=1.0, description="Classification confidence score"
+    )
+    determining_stage: Literal["stage_1", "stage_2"] = Field(
+        description="Which stage determined the verdict"
+    )
+    matched_patterns: list[str] = Field(
+        default_factory=list,
+        description="Regex patterns that matched",
+    )
+    llm_reasoning: str = Field(
+        default="",
+        description="LLM reasoning for Stage 2 decisions",
+    )
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When classification occurred",
+    )
+    sender: str = Field(default="", description="Email sender address")
+    subject: str = Field(default="", description="Email subject line")
 
 
 class ScamPattern(BaseModel):
@@ -69,10 +100,18 @@ class ScamPattern(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    name: str
-    regex: str  # Raw regex string (compiled at classifier init)
-    category: Literal["urgency", "financial_lure", "impersonation", "phishing"]
-    weight: float = Field(ge=0.0, le=1.0)
+    name: str = Field(description="Pattern identifier name")
+    regex: str = Field(
+        description="Raw regex string (compiled at classifier init)"
+    )
+    category: Literal[
+        "urgency", "financial_lure", "impersonation", "phishing"
+    ] = Field(description="Scam category this pattern detects")
+    weight: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="Contribution weight to confidence score",
+    )
 
 
 class OutboundEmail(BaseModel):
@@ -80,17 +119,35 @@ class OutboundEmail(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    to_address: str
-    subject: str = ""  # "Re: " + original subject, max 255 chars
-    body: str
-    in_reply_to: str = ""
-    references: str = ""
+    to_address: str = Field(description="Recipient email address")
+    subject: str = Field(
+        default="",
+        description="Email subject (Re: + original, max 255 chars)",
+    )
+    body: str = Field(description="Email body content")
+    in_reply_to: str = Field(
+        default="", description="In-Reply-To header value"
+    )
+    references: str = Field(
+        default="", description="References header value"
+    )
     status: Literal[
-        "pending", "pending_retry", "sent", "failed_permanent", "dropped_queue_full"
-    ] = "pending"
-    retry_count: int = Field(default=0, ge=0)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_attempt_at: Optional[datetime] = None
+        "pending",
+        "pending_retry",
+        "sent",
+        "failed_permanent",
+        "dropped_queue_full",
+    ] = Field(default="pending", description="Current delivery status")
+    retry_count: int = Field(
+        default=0, ge=0, description="Number of delivery attempts"
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        description="When the email was queued",
+    )
+    last_attempt_at: Optional[datetime] = Field(
+        default=None, description="Timestamp of last delivery attempt"
+    )
 
     @field_validator("subject")
     @classmethod
@@ -106,8 +163,17 @@ class EmailThreadMetadata(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    sender_address: str
-    subject: str = ""
-    message_ids: list[str] = Field(default_factory=list)
-    source_channel: Literal["email"] = "email"
-    message_count: int = 0
+    sender_address: str = Field(
+        description="Thread originator email address"
+    )
+    subject: str = Field(default="", description="Thread subject line")
+    message_ids: list[str] = Field(
+        default_factory=list,
+        description="Message-IDs in this thread",
+    )
+    source_channel: Literal["email"] = Field(
+        default="email", description="Communication channel"
+    )
+    message_count: int = Field(
+        default=0, description="Number of messages in thread"
+    )

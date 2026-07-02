@@ -13,6 +13,7 @@ from dashboard.soc_dashboard import SOCDashboard
 from dashboard.styles import inject_custom_css
 from pipeline import (
     PipelineError,
+    PipelineResult,
     _get_default_blocked_response,
     _run_extraction_pipeline,
     _store_ioc,
@@ -26,6 +27,7 @@ from pipeline import (
 # Re-export pipeline symbols for backward compatibility
 __all__ = [
     "PipelineError",
+    "PipelineResult",
     "_get_default_blocked_response",
     "_run_extraction_pipeline",
     "_store_ioc",
@@ -64,6 +66,9 @@ if st.session_state.get("email_ingestion_module") is not None:
         st.session_state["_email_cleanup_registered"] = True
 
 # Flush email ingestion results into session state each render cycle
+# NOTE: flush_email_ingestion_state() runs during initialization phase (before render).
+# This is acceptable per Streamlit's execution model — it synchronizes background
+# thread results into session_state before any widgets are rendered.
 flush_email_ingestion_state()
 
 # --- SOC Dashboard ---

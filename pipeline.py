@@ -11,11 +11,12 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 import streamlit as st
 from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, Field
 
 from components.email_ingestion import EmailIngestionModule
 from components.imap_client import IMAPClient
@@ -46,6 +47,31 @@ class PipelineError(Exception):
         self.message = message
         self.original_error = original_error
         super().__init__(f"[{stage}] {message}")
+
+
+class PipelineResult(BaseModel):
+    """Structured result from pipeline execution."""
+
+    model_config = ConfigDict(frozen=True)
+
+    success: bool = Field(
+        description="Whether the pipeline completed without critical errors"
+    )
+    error: Optional[str] = Field(
+        default=None, description="Error message if pipeline failed"
+    )
+    error_stage: Optional[str] = Field(
+        default=None,
+        description="Pipeline stage where error occurred",
+    )
+    response_content: str = Field(
+        default="",
+        description="Generated persona response content",
+    )
+    was_blocked: bool = Field(
+        default=False,
+        description="Whether the input was blocked by safety filter",
+    )
 
 
 def initialize_chat_state() -> None:
@@ -214,7 +240,8 @@ def initialize_email_ingestion() -> "EmailIngestionModule | None":
             import httpx
             from mistralai.client import Mistral
 
-            http_client = httpx.Client(verify=False)
+            ssl_verify = os.environ.get("ROADBLOCK_SSL_VERIFY", "true").lower() != "false"
+            http_client = httpx.Client(verify=ssl_verify)
             llm_client = Mistral(api_key=mistral_api_key, client=http_client)
             logger.info("Stage 2 LLM classification enabled (Mistral)")
         except Exception as e:
@@ -266,7 +293,7 @@ def process_scammer_message(
     threat_parser: Optional[ThreatParser] = None,
     mcp_client: Optional[IoCLookupMCPClient] = None,
     notification_module: Optional[NotificationModule] = None,
-) -> None:
+) -> PipelineResult:
     """Process a scammer message through the full RoadBlock pipeline.
 
     Sequential flow:
@@ -353,14 +380,14 @@ def process_scammer_message(
         scammer_msg = ChatMessage(
             sender="scammer",
             content=sanitized_message,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             was_sanitized=len(scan_result.detected_patterns) > 0,
             was_blocked=is_blocked,
         )
         persona_msg = ChatMessage(
             sender="persona",
             content=response_content,
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
         )
         st.session_state["conversation_history"].append(scammer_msg)
         st.session_state["conversation_history"].append(persona_msg)
@@ -386,7 +413,13 @@ def process_scammer_message(
         st.session_state["last_error"] = (
             f"Pipeline timeout: synchronous stages took {elapsed:.1f}s"
         )
-        return
+        return PipelineResult(
+            success=False,
+            error=f"Pipeline timeout: synchronous stages took {elapsed:.1f}s",
+            error_stage="timeout",
+            response_content=response_content,
+            was_blocked=is_blocked,
+        )
 
     # --- Stage 5: Threat_Parser extraction + MCP lookup ---
     message_for_extraction = raw_message
@@ -405,6 +438,12 @@ def process_scammer_message(
         logger.error(str(error), exc_info=True)
         st.session_state["parser_status"] = "error"
         st.session_state["last_error"] = str(error)
+
+    return PipelineResult(
+        success=True,
+        response_content=response_content,
+        was_blocked=is_blocked,
+    )
 
 
 def _run_extraction_pipeline(
@@ -516,7 +555,7 @@ def _run_extraction_pipeline(
         state["last_error"] = f"Extraction error: {e}"
 
 
-def _store_ioc(ioc, state=None) -> None:
+def _store_ioc(ioc, state=None) -> bool:
     """Store an extracted IoC in the appropriate session state category list.
 
     Deduplicates by extracted_value — if the same IoC value already exists
@@ -632,7 +671,7 @@ def flush_email_ingestion_state() -> None:
             _chat_msg = ChatMessage(
                 sender=_msg_data.get("sender", "scammer"),
                 content=_msg_data.get("content", ""),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             st.session_state["conversation_history"].append(_chat_msg)
 

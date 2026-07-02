@@ -1,16 +1,13 @@
 """Mock AWS notification module for IoC-triggered GuardDuty findings and WAF IP set updates."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from models.aws_models import GuardDutyFinding, MockAWSPayload, WAFPayload
 from models.ioc_models import (
     BaseIoC,
-    CryptoWalletIoC,
     IoCCategory,
-    MuleBankAccountIoC,
     PhishingDomainIoC,
-    PhoneNumberIoC,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,11 +27,14 @@ class NotificationModule:
         """
         try:
             if ioc.category == IoCCategory.PHISHING_DOMAIN:
-                assert isinstance(ioc, PhishingDomainIoC)
+                if not isinstance(ioc, PhishingDomainIoC):
+                    raise TypeError(
+                        f"Expected PhishingDomainIoC, got {type(ioc).__name__}"
+                    )
                 waf_payload = self.generate_waf_payload(ioc)
                 return MockAWSPayload(
                     payload_type="waf_ipset_update",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     severity="HIGH",
                     summary=f"WAF IP set update: blocked phishing domain {ioc.domain}",
                     raw_payload=waf_payload.model_dump(),
@@ -48,7 +48,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     severity="HIGH",
                     summary=(
                         f"GuardDuty finding: cryptocurrency wallet detected"
@@ -65,7 +65,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     severity="CRITICAL",
                     summary=(
                         f"GuardDuty finding: mule bank account detected"
@@ -82,7 +82,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.utcnow(),
+                    timestamp=datetime.now(timezone.utc),
                     severity="MEDIUM",
                     summary=(
                         f"GuardDuty finding: suspicious phone number detected"
@@ -92,11 +92,11 @@ class NotificationModule:
                 )
 
             else:
-                logger.warning(f"Unknown IoC category: {ioc.category}")
+                logger.warning("Unknown IoC category: %s", ioc.category)
                 raise ValueError(f"Unsupported IoC category: {ioc.category}")
 
         except Exception as e:
-            logger.error(f"Error generating notification for IoC {ioc.id}: {e}")
+            logger.error("Error generating notification for IoC %s: %s", ioc.id, e)
             raise
 
     def generate_waf_payload(self, domain_ioc: PhishingDomainIoC) -> WAFPayload:
@@ -108,7 +108,7 @@ class NotificationModule:
                 Addresses=[domain_ioc.domain],
             )
         except Exception as e:
-            logger.error(f"Error generating WAF payload for {domain_ioc.domain}: {e}")
+            logger.error("Error generating WAF payload for %s: %s", domain_ioc.domain, e)
             raise
 
     def generate_guardduty_payload(
@@ -134,6 +134,6 @@ class NotificationModule:
             )
         except Exception as e:
             logger.error(
-                f"Error generating GuardDuty payload for {ioc.extracted_value}: {e}"
+                "Error generating GuardDuty payload for %s: %s", ioc.extracted_value, e
             )
             raise

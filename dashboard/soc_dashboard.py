@@ -6,6 +6,7 @@ Streamlit widgets. No business logic or state mutation.
 
 from __future__ import annotations
 
+import html
 from datetime import datetime
 from typing import Any
 
@@ -81,6 +82,7 @@ class SOCDashboard:
                 if isinstance(msg, dict)
                 else getattr(msg, "content", "")
             )
+            content = html.escape(content)
             timestamp = (
                 msg.get("timestamp", None)
                 if isinstance(msg, dict)
@@ -328,6 +330,7 @@ class SOCDashboard:
             severity = _get_field(notification, "severity", "UNKNOWN")
             payload_type = _get_field(notification, "payload_type", "unknown")
             summary = _get_field(notification, "summary", "No summary available")
+            summary = html.escape(summary)
 
             ts_str = _format_timestamp(timestamp)
 
@@ -356,6 +359,7 @@ class SOCDashboard:
 def _render_ioc_badge(st_module: Any, ioc: Any) -> None:
     """Render an IoC value with a styled badge indicating known/new status."""
     value = _get_field(ioc, "extracted_value", "N/A")
+    value = html.escape(str(value))
     status = _get_known_status(ioc)
     if "New" in status:
         badge_class = "ioc-new"

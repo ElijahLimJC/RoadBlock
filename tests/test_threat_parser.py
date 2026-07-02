@@ -13,12 +13,6 @@ from components.threat_parser import ThreatParser
 from models.chat_models import ExtractionResult
 
 
-@pytest.fixture
-def parser() -> ThreatParser:
-    """Create a fresh ThreatParser instance."""
-    return ThreatParser()
-
-
 class TestExtractIocsAsync:
     """Tests for ThreatParser.extract_iocs() orchestration."""
 
@@ -517,7 +511,7 @@ class TestPipelineErrorResilience:
         from datetime import datetime, timedelta
         from copy import deepcopy
 
-        from app import process_scammer_message
+        from pipeline import process_scammer_message
         from components.safety_filter import SafetyFilter
         from components.persona_engine import PersonaEngine
         from components.stalling_tracker import StallingTracker
@@ -619,7 +613,7 @@ class TestPipelineErrorResilience:
             )
 
         # --- Patch st.session_state and run pipeline ---
-        with mock_patch("app.st.session_state", mock_state):
+        with mock_patch("pipeline.st.session_state", mock_state):
             with mock_patch("streamlit.session_state", mock_state):
                 # Should NOT raise — the pipeline handles errors internally
                 process_scammer_message(

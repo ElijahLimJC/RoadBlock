@@ -6,6 +6,7 @@ Pydantic models. All parsing functions are wrapped in try/except to
 ensure graceful degradation under noisy input (Noisy Input Defense).
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -230,19 +231,15 @@ class ThreatParser:
                         # Try bech32m decoding (used for taproot bc1p addresses)
                         hrp, data = bech32.bech32_decode(candidate)
                         if hrp is None or data is None:
-                            # Checksum failed but format matches — still
-                            # extract as IoC (scammers often use fake addrs)
-                            iocs.append(
-                                CryptoWalletIoC(
-                                    wallet_type=WalletType.BITCOIN_BECH32,
-                                    address=candidate,
-                                    extracted_value=candidate,
-                                    source_message=text,
+                            rejections.append(
+                                RejectionLogEntry(
+                                    candidate=candidate,
+                                    rejection_reason="Bech32 checksum validation failed",
+                                    ioc_category=IoCCategory.CRYPTOCURRENCY_WALLET,
                                 )
                             )
                             logger.debug(
-                                "Bech32 candidate %s has invalid checksum "
-                                "but extracted anyway (honeypot mode)",
+                                "Bech32 candidate %s has invalid checksum",
                                 candidate,
                             )
                             continue
@@ -268,19 +265,15 @@ class ThreatParser:
                         )
                     )
                 except (ValueError, Exception) as e:
-                    # On any error, still extract — better to have a
-                    # potentially-invalid IoC than miss scammer intel
-                    iocs.append(
-                        CryptoWalletIoC(
-                            wallet_type=WalletType.BITCOIN_BECH32,
-                            address=candidate,
-                            extracted_value=candidate,
-                            source_message=text,
+                    rejections.append(
+                        RejectionLogEntry(
+                            candidate=candidate,
+                            rejection_reason="Bech32 checksum validation failed",
+                            ioc_category=IoCCategory.CRYPTOCURRENCY_WALLET,
                         )
                     )
                     logger.debug(
-                        "Bech32 candidate %s validation error (%s), "
-                        "extracted anyway (honeypot mode)",
+                        "Bech32 candidate %s validation error: %s",
                         candidate,
                         e,
                     )
@@ -917,50 +910,72 @@ class ThreatParser:
     ) -> "phonenumbers.PhoneNumber | None":
         """Attempt to parse a phone number without a plus prefix.
 
-        Tries parsing with SG region first (primary scam target). If SG
-        parsing succeeds, returns immediately. Otherwise falls through to
-        other common regions. Returns None if no valid parse found.
+        Tries parsing across all candidate regions and collects valid parses.
+        If multiple distinct E.164 numbers result, rejects as ambiguous.
+        Returns None if no valid parse found or ambiguity detected.
 
         Args:
             candidate: Phone number string without plus prefix.
             rejections: List to append rejections to if parsing fails.
 
         Returns:
-            Parsed PhoneNumber object if valid, or None.
+            Parsed PhoneNumber object if unambiguous, or None.
         """
-        # SG first - primary target for this honeypot
-        try:
-            parsed = phonenumbers.parse(candidate, "SG")
-            if phonenumbers.is_valid_number(parsed):
-                return parsed
-        except phonenumbers.NumberParseException:
-            pass
+        all_regions = ["SG", "US", "GB", "DE", "AU", "IN", "FR", "JP", "BR"]
+        valid_parses: list[phonenumbers.PhoneNumber] = []
 
-        # Fallback to other common regions
-        fallback_regions = ["US", "GB", "DE", "AU", "IN", "FR", "JP", "BR"]
-        for region in fallback_regions:
+        for region in all_regions:
             try:
                 parsed = phonenumbers.parse(candidate, region)
                 if phonenumbers.is_valid_number(parsed):
-                    return parsed
+                    valid_parses.append(parsed)
             except phonenumbers.NumberParseException:
                 continue
 
-        rejections.append(
-            RejectionLogEntry(
-                candidate=candidate,
-                rejection_reason=(
-                    "Unrecognizable format: could not parse as a "
-                    "valid phone number in any common region"
-                ),
-                ioc_category=IoCCategory.PHONE_NUMBER,
+        if not valid_parses:
+            rejections.append(
+                RejectionLogEntry(
+                    candidate=candidate,
+                    rejection_reason=(
+                        "Unrecognizable format: could not parse as a "
+                        "valid phone number in any common region"
+                    ),
+                    ioc_category=IoCCategory.PHONE_NUMBER,
+                )
             )
-        )
-        logger.debug(
-            "Rejected phone candidate '%s': no valid parse in any region",
-            candidate,
-        )
-        return None
+            logger.debug(
+                "Rejected phone candidate '%s': no valid parse in any region",
+                candidate,
+            )
+            return None
+
+        # Compute distinct E.164 representations
+        distinct_e164: set[str] = set()
+        for parsed in valid_parses:
+            e164 = phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.E164
+            )
+            distinct_e164.add(e164)
+
+        if len(distinct_e164) > 1:
+            rejections.append(
+                RejectionLogEntry(
+                    candidate=candidate,
+                    rejection_reason=(
+                        "Ambiguous country code: resolves to multiple E.164 numbers"
+                    ),
+                    ioc_category=IoCCategory.PHONE_NUMBER,
+                )
+            )
+            logger.debug(
+                "Rejected phone candidate '%s': ambiguous (%d distinct E.164)",
+                candidate,
+                len(distinct_e164),
+            )
+            return None
+
+        # Exactly one distinct E.164 — return the first valid parse
+        return valid_parses[0]
 
     def extract_mule_accounts(
         self, text: str
@@ -1257,3 +1272,18 @@ class ThreatParser:
             )
 
         return ExtractionResult(iocs=all_iocs, rejections=all_rejections)
+
+    async def extract_iocs_async(self, message: str) -> ExtractionResult:
+        """Async wrapper around synchronous extract_iocs().
+
+        Runs the synchronous extraction in a thread pool executor to
+        avoid blocking the event loop.
+
+        Args:
+            message: Raw message text to extract IoCs from.
+
+        Returns:
+            ExtractionResult containing validated IoCs and rejection log entries.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.extract_iocs, message)

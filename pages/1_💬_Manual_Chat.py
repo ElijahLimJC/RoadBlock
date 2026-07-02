@@ -39,7 +39,8 @@ if submitted and raw_message.strip():
                 import httpx
                 from mistralai.client import Mistral
 
-                http_client = httpx.Client(verify=False)
+                ssl_verify = os.environ.get("ROADBLOCK_SSL_VERIFY", "true").lower() != "false"
+                http_client = httpx.Client(verify=ssl_verify)
                 client = Mistral(api_key=mistral_key, client=http_client)
                 persona = PersonaEngine(llm_client=client)
             except Exception:

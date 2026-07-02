@@ -32,20 +32,20 @@ if st.session_state.get("email_ingestion_module") is not None:
     # Merge staged conversation messages
     _staged_msgs = st.session_state.email_ingestion.pop("_staged_messages", [])
     if _staged_msgs:
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         for _msg_data in _staged_msgs:
             _chat_msg = ChatMessage(
                 sender=_msg_data.get("sender", "scammer"),
                 content=_msg_data.get("content", ""),
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
             )
             st.session_state["conversation_history"].append(_chat_msg)
 
     # Apply pending turn updates to stalling metrics
     _pending_turns = st.session_state.email_ingestion.pop("_pending_turns", 0)
     if _pending_turns > 0:
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         from components.stalling_tracker import StallingTracker
 
@@ -53,28 +53,38 @@ if st.session_state.get("email_ingestion_module") is not None:
         for _ in range(_pending_turns):
             _tracker.record_turn(st.session_state)
 
-    # Merge staged IoCs
+    # Merge staged IoCs with deduplication
     _staged_iocs = st.session_state.email_ingestion.pop("_staged_iocs", [])
     if _staged_iocs:
         _iocs_state = st.session_state.get("iocs", {})
+        _new_count = 0
         for _ioc_data in _staged_iocs:
             _cat = _ioc_data.get("category", "")
+            _value = _ioc_data.get("extracted_value")
             if _cat == "cryptocurrency_wallet":
-                _iocs_state.setdefault("cryptocurrency_wallets", []).append(
-                    _ioc_data
-                )
+                _target = _iocs_state.setdefault("cryptocurrency_wallets", [])
             elif _cat == "phishing_domain":
-                _iocs_state.setdefault("phishing_domains", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("phishing_domains", [])
             elif _cat == "phone_number":
-                _iocs_state.setdefault("phone_numbers", []).append(_ioc_data)
+                _target = _iocs_state.setdefault("phone_numbers", [])
             elif _cat == "mule_bank_account":
-                _iocs_state.setdefault("mule_bank_accounts", []).append(
-                    _ioc_data
-                )
+                _target = _iocs_state.setdefault("mule_bank_accounts", [])
+            else:
+                continue
+            # Deduplicate by extracted_value
+            _existing = {
+                (d.get("extracted_value") if isinstance(d, dict)
+                 else getattr(d, "extracted_value", None))
+                for d in _target
+            }
+            if _value not in _existing:
+                _target.append(_ioc_data)
+                _new_count += 1
         st.session_state["iocs"] = _iocs_state
-        st.session_state["new_ioc_count"] = (
-            st.session_state.get("new_ioc_count", 0) + len(_staged_iocs)
-        )
+        if _new_count > 0:
+            st.session_state["new_ioc_count"] = (
+                st.session_state.get("new_ioc_count", 0) + _new_count
+            )
 
     # Render panels
     _dashboard.render_email_ingestion_panel(dict(st.session_state))
