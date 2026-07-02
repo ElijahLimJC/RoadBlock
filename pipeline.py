@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from components.email_ingestion import EmailIngestionModule
 from components.imap_client import IMAPClient
 from components.ioc_lookup_mcp import IoCLookupMCPClient
+from components.virustotal_mcp import VirusTotalMCPClient
 from components.notification_module import NotificationModule
 from components.persona_engine import PersonaEngine
 from components.safety_filter import SafetyFilter
@@ -95,6 +96,7 @@ def initialize_chat_state() -> None:
         "last_error": None,
         "mcp_lookup_cache": {},
         "mcp_server_status": "unknown",
+        "vt_server_status": "unknown",
         "known_ioc_count": 0,
         "new_ioc_count": 0,
     }
@@ -293,6 +295,7 @@ def process_scammer_message(
     threat_parser: Optional[ThreatParser] = None,
     mcp_client: Optional[IoCLookupMCPClient] = None,
     notification_module: Optional[NotificationModule] = None,
+    virustotal_client: Optional[VirusTotalMCPClient] = None,
 ) -> PipelineResult:
     """Process a scammer message through the full RoadBlock pipeline.
 
@@ -312,6 +315,7 @@ def process_scammer_message(
         threat_parser: ThreatParser instance (uses session singleton if None).
         mcp_client: IoCLookupMCPClient instance (optional, skips MCP if None).
         notification_module: NotificationModule instance (created if None).
+        virustotal_client: VirusTotalMCPClient instance (optional, skips VT if None).
     """
     pipeline_start = time.time()
 
@@ -432,6 +436,7 @@ def process_scammer_message(
             mcp_client,
             notification_module,
             st.session_state,
+            virustotal_client,
         )
     except Exception as e:
         error = PipelineError("Threat_Parser", f"Extraction failed: {e}", e)
@@ -452,14 +457,16 @@ def _run_extraction_pipeline(
     mcp_client: Optional[IoCLookupMCPClient],
     notification_module: NotificationModule,
     state: Any = None,
+    virustotal_client: Optional[VirusTotalMCPClient] = None,
 ) -> None:
     """Run the extraction pipeline.
 
     Executes:
     1. ThreatParser.extract_iocs(message)
     2. MCP lookup for each extracted IoC
-    3. Generate notifications for NEW IoCs only
-    4. Update Chat_State with results
+    3. VirusTotal MCP enrichment for each extracted IoC
+    4. Generate notifications for NEW IoCs only
+    5. Update Chat_State with results
 
     Args:
         message: The raw message to extract IoCs from.
@@ -467,6 +474,7 @@ def _run_extraction_pipeline(
         mcp_client: Optional MCP client for IoC lookups.
         notification_module: NotificationModule for generating alerts.
         state: Session state reference.
+        virustotal_client: Optional VirusTotal MCP client for enrichment.
     """
     if state is None:
         try:
@@ -510,11 +518,39 @@ def _run_extraction_pipeline(
                 logger.warning("MCP batch lookup failed: %s", e)
                 state["mcp_server_status"] = "disconnected"
 
+        # --- VirusTotal MCP enrichment ---
+        vt_results = []
+        if virustotal_client is not None and virustotal_client.is_configured():
+            try:
+                vt_loop = asyncio.new_event_loop()
+                try:
+                    vt_results = vt_loop.run_until_complete(
+                        asyncio.wait_for(
+                            virustotal_client.batch_lookup(
+                                extraction_result.iocs, cache
+                            ),
+                            timeout=30.0,
+                        )
+                    )
+                finally:
+                    vt_loop.close()
+                state["mcp_lookup_cache"] = cache
+                state["vt_server_status"] = "connected"
+            except asyncio.TimeoutError:
+                logger.warning("VirusTotal batch lookup timed out after 30s")
+                state["vt_server_status"] = "timeout"
+            except Exception as e:
+                logger.warning("VirusTotal batch lookup failed: %s", e)
+                state["vt_server_status"] = "error"
+
         # --- Store IoCs and generate notifications for NEW ones ---
         for i, ioc in enumerate(extraction_result.iocs):
             is_known = False
             if i < len(lookup_results):
                 is_known = lookup_results[i].is_known
+            # Also check VT results — if either source says known, treat as known
+            if not is_known and i < len(vt_results):
+                is_known = vt_results[i].is_known
 
             # Store IoC (deduplicates by extracted_value)
             was_stored = _store_ioc(ioc, state)
