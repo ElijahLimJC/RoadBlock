@@ -551,6 +551,85 @@ class EmailIngestionModule:
             # Step 4: Generate persona response with thread context
             logger.info("[PIPELINE] Step 4: Generating persona response...")
             thread_history = self._get_thread_history(email_msg.sender)
+
+            # Step 3.5: Scan thread history for accumulated injection context
+            thread_text = " ".join(
+                entry.get("content", "") for entry in thread_history
+            )
+            if thread_text.strip():
+                history_scan = safety_filter.scan(thread_text)
+                if history_scan.is_blocked:
+                    logger.warning(
+                        "[PIPELINE] Thread history for %s contains accumulated "
+                        "injection (blocked). Using fallback response.",
+                        email_msg.sender,
+                    )
+                    response_content = _DEFAULT_BLOCKED_RESPONSE
+
+                    # Add fallback to thread history
+                    if email_msg.sender in self._threads:
+                        self._threads[email_msg.sender].setdefault(
+                            "messages", []
+                        ).append(
+                            {"sender": "persona", "content": response_content}
+                        )
+
+                    # Enqueue conversation messages for dashboard display
+                    self._enqueue_result("conversation_message", {
+                        "sender": "scammer",
+                        "content": scan_result.sanitized_content,
+                    })
+                    self._enqueue_result("conversation_message", {
+                        "sender": "persona",
+                        "content": response_content,
+                    })
+
+                    # Queue outbound response
+                    outbound = OutboundEmail(
+                        to_address=email_msg.reply_to or email_msg.sender,
+                        subject=self._smtp_client.compose_reply_subject(
+                            email_msg.subject
+                        ),
+                        body=response_content,
+                        in_reply_to=email_msg.message_id,
+                    )
+                    try:
+                        send_success = self._smtp_client.send_reply(
+                            to_address=outbound.to_address,
+                            subject=outbound.subject,
+                            body=outbound.body,
+                            in_reply_to=outbound.in_reply_to or None,
+                        )
+                        if send_success:
+                            self._outbound_sent += 1
+                        else:
+                            self._enqueue_result(
+                                "outbound", outbound.model_dump()
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            "[PIPELINE] SMTP send failed: %s", e
+                        )
+                        self._enqueue_result("outbound", outbound.model_dump())
+
+                    # Still extract IoCs (best-effort)
+                    try:
+                        extraction_result = self._run_extraction(
+                            self._threat_parser, email_msg.body
+                        )
+                        if extraction_result and extraction_result.iocs:
+                            ioc_data_list = [
+                                ioc.model_dump()
+                                for ioc in extraction_result.iocs
+                            ]
+                            self._enqueue_result("iocs", ioc_data_list)
+                    except Exception as e:
+                        logger.warning(
+                            "IoC extraction failed after thread poisoning: %s",
+                            e,
+                        )
+                    return
+
             response_content = self._generate_persona_response(
                 scan_result.sanitized_content, thread_history
             )
