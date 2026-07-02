@@ -729,6 +729,9 @@ class EmailIngestionModule:
                 email_msg.sender,
                 e,
             )
+        finally:
+            # Sync counters immediately so UI updates without waiting for next poll
+            self._enqueue_counter_update()
 
     def _handle_blocked_message(self, email_msg: EmailMessage) -> None:
         """Handle an email that was fully blocked by the Safety Filter.
