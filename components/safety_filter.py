@@ -203,6 +203,82 @@ def _build_default_patterns() -> list[InjectionPattern]:
         except re.error as e:
             logger.warning("Failed to compile pattern %s: %s", name, e)
 
+    # --- Social Engineering / Manipulation Patterns ---
+    social_engineering = [
+        (
+            "developer_claim",
+            r"(?i)\bi\s+am\s+(?:your\s+)?(?:developer|creator|programmer|admin)\b",
+        ),
+        (
+            "red_team_exercise",
+            r"(?i)\b(?:red[\s-]?team|penetration\s+test|security\s+test)\b",
+        ),
+        (
+            "drop_character",
+            r"(?i)\b(?:drop|break|stop|end|quit|exit)\s+(?:your\s+)?"
+            r"(?:character|persona|act|acting|pretending|roleplay)\b",
+        ),
+        (
+            "game_over",
+            r"(?i)\b(?:game|exercise|simulation|test|experiment)\s+"
+            r"(?:is\s+)?(?:over|ended|done|finished|complete)\b",
+        ),
+        (
+            "stop_pretending",
+            r"(?i)\bstop\s+(?:pretending|acting|faking|playing)\b",
+        ),
+        (
+            "you_are_ai",
+            r"(?i)\byou\s+(?:are|'re)\s+(?:actually\s+)?(?:an?\s+)?"
+            r"(?:AI|bot|chatbot|program|machine|artificial)\b",
+        ),
+        (
+            "i_know_you_are",
+            r"(?i)\bi\s+know\s+(?:you\s+(?:are|'re)|that\s+you)\s+"
+            r"(?:an?\s+)?(?:AI|bot|not\s+(?:real|human))\b",
+        ),
+        (
+            "hypothetical_scenario",
+            r"(?i)\b(?:hypothetical|imagine|suppose|what\s+if)\b[^.]{0,30}"
+            r"\b(?:uncensored|unrestricted|no\s+(?:rules|limits|filters))\b",
+        ),
+        (
+            "academic_framing",
+            r"(?i)\b(?:academic|research|study|paper|screenplay|fiction)\b[^.]{0,80}"
+            r"\b(?:AI|drops?\s+(?:its?|their)\s+guard|reveals?|breaks?\s+character)\b",
+        ),
+        (
+            "ai_drops_guard",
+            r"(?i)\b(?:AI|bot|system)\s+(?:drops?|lowers?|removes?)\s+"
+            r"(?:its?|their|the)\s+(?:guard|defenses?|filters?|safety)\b",
+        ),
+        (
+            "authority_impersonation",
+            r"(?i)\b(?:police|FBI|SPF|government|authority|officer)\b[^.]{0,40}"
+            r"\b(?:verify|confirm|state|reveal)\s+(?:your|identity|nature)\b",
+        ),
+        (
+            "confirm_understand",
+            r"(?i)\b(?:confirm|acknowledge|verify)\s+(?:you\s+)?understand\b",
+        ),
+        (
+            "talk_normally",
+            r"(?i)\b(?:talk|speak|respond|answer)\s+(?:to\s+me\s+)?"
+            r"(?:normally|directly|honestly|like\s+(?:a\s+normal|ChatGPT))\b",
+        ),
+    ]
+    for name, pat in social_engineering:
+        try:
+            patterns.append(
+                InjectionPattern(
+                    name=name,
+                    pattern=re.compile(pat),
+                    category="social_engineering",
+                )
+            )
+        except re.error as e:
+            logger.warning("Failed to compile pattern %s: %s", name, e)
+
     return patterns
 
 
