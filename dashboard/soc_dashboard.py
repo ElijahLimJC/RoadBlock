@@ -60,8 +60,7 @@ class SOCDashboard:
     def render_conversation_log(self, messages: list[dict[str, Any]]) -> None:
         """Display chat messages with sender attribution and timestamps.
 
-        Messages are displayed in chronological order. Each message shows
-        the sender (scammer/persona) and timestamp.
+        Messages are displayed in chronological order as styled chat bubbles.
         """
         import streamlit as st
 
@@ -72,24 +71,42 @@ class SOCDashboard:
             return
 
         for msg in messages:
-            sender = msg.get("sender", "unknown") if isinstance(msg, dict) else getattr(msg, "sender", "unknown")
-            content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
-            timestamp = msg.get("timestamp", None) if isinstance(msg, dict) else getattr(msg, "timestamp", None)
+            sender = (
+                msg.get("sender", "unknown")
+                if isinstance(msg, dict)
+                else getattr(msg, "sender", "unknown")
+            )
+            content = (
+                msg.get("content", "")
+                if isinstance(msg, dict)
+                else getattr(msg, "content", "")
+            )
+            timestamp = (
+                msg.get("timestamp", None)
+                if isinstance(msg, dict)
+                else getattr(msg, "timestamp", None)
+            )
 
-            # Format timestamp
             ts_str = _format_timestamp(timestamp)
 
-            # Determine display style based on sender
             if sender == "scammer":
-                icon = "🔴"
-                label = "Scammer"
+                st.markdown(
+                    f'<div class="chat-scammer">'
+                    f'<div class="chat-sender">🔴 Scammer</div>'
+                    f'{content}'
+                    f'<div class="chat-time">{ts_str}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
             else:
-                icon = "🟢"
-                label = "Persona"
-
-            st.markdown(f"**{icon} {label}** — {ts_str}")
-            st.text(content)
-            st.markdown("---")
+                st.markdown(
+                    f'<div class="chat-persona">'
+                    f'<div class="chat-sender">🟢 Ah Ma</div>'
+                    f'{content}'
+                    f'<div class="chat-time">{ts_str}</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
 
     def render_ioc_panel(
         self, iocs: dict[str, list[Any]], chat_state: dict[str, Any] | None = None
@@ -117,9 +134,7 @@ class SOCDashboard:
                 st.write("No cryptocurrency wallets detected.")
             else:
                 for ioc in crypto_wallets:
-                    value = _get_field(ioc, "extracted_value", "N/A")
-                    status = _get_known_status(ioc)
-                    st.write(f"• `{value}` {status}")
+                    _render_ioc_badge(st, ioc)
 
         # Phishing Domains
         with st.expander(
@@ -129,9 +144,7 @@ class SOCDashboard:
                 st.write("No phishing domains detected.")
             else:
                 for ioc in phishing_domains:
-                    value = _get_field(ioc, "extracted_value", "N/A")
-                    status = _get_known_status(ioc)
-                    st.write(f"• `{value}` {status}")
+                    _render_ioc_badge(st, ioc)
 
         # Phone Numbers
         with st.expander(
@@ -141,9 +154,7 @@ class SOCDashboard:
                 st.write("No phone numbers detected.")
             else:
                 for ioc in phone_numbers:
-                    value = _get_field(ioc, "extracted_value", "N/A")
-                    status = _get_known_status(ioc)
-                    st.write(f"• `{value}` {status}")
+                    _render_ioc_badge(st, ioc)
 
         # Mule Bank Accounts
         with st.expander(
@@ -153,9 +164,7 @@ class SOCDashboard:
                 st.write("No mule bank accounts detected.")
             else:
                 for ioc in mule_accounts:
-                    value = _get_field(ioc, "extracted_value", "N/A")
-                    status = _get_known_status(ioc)
-                    st.write(f"• `{value}` {status}")
+                    _render_ioc_badge(st, ioc)
 
     def render_metrics(
         self, metrics: dict[str, Any] | Any, chat_state: dict[str, Any] | None = None
@@ -325,14 +334,44 @@ class SOCDashboard:
             # Severity color coding
             severity_icon = _severity_icon(severity)
 
+            severity_lower = severity.lower() if isinstance(severity, str) else "low"
+            notif_class = (
+                f"notif-{severity_lower}"
+                if severity_lower in ("critical", "high", "medium", "low")
+                else "notif-low"
+            )
             st.markdown(
-                f"{severity_icon} **[{severity}]** `{payload_type}` — {summary}  \n"
-                f"<small>{ts_str}</small>",
+                f'<div class="notif-card {notif_class}">'
+                f'<strong>{severity_icon} [{severity}]</strong> <code>{payload_type}</code><br>'
+                f'{summary}<br>'
+                f'<small style="opacity:0.5">{ts_str}</small>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
 
 
 # --- Module-level helper functions (not part of the class) ---
+
+
+def _render_ioc_badge(st_module: Any, ioc: Any) -> None:
+    """Render an IoC value with a styled badge indicating known/new status."""
+    value = _get_field(ioc, "extracted_value", "N/A")
+    status = _get_known_status(ioc)
+    if "New" in status:
+        badge_class = "ioc-new"
+        badge_label = "NEW"
+    elif "Known" in status:
+        badge_class = "ioc-known"
+        badge_label = "KNOWN"
+    else:
+        badge_class = "ioc-unknown"
+        badge_label = "UNKNOWN"
+    st_module.markdown(
+        f'<code>{value}</code> '
+        f'<span class="ioc-badge {badge_class}">'
+        f'{badge_label}</span>',
+        unsafe_allow_html=True,
+    )
 
 
 def _format_timestamp(ts: Any) -> str:
