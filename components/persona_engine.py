@@ -619,7 +619,7 @@ class PersonaEngine:
             return None
 
     def _enforce_word_bounds(self, response: str) -> str:
-        """Enforce word bounds on a response (5-150 words).
+        """Enforce word bounds on a response (20-300 words).
 
         If too short, pads with a brief stalling request. If too long,
         truncates at the last sentence boundary within the word limit.
@@ -633,14 +633,14 @@ class PersonaEngine:
         words = response.split()
         word_count = len(words)
 
-        if word_count < 5:
+        if word_count < 20:
             # Pad with brief stalling content
             padding = " Hah? Can say again ah? I blur already."
             response = response.rstrip() + padding
 
-        elif word_count > 150:
+        elif word_count > 300:
             # Truncate at sentence boundary if possible
-            truncated = " ".join(words[:150])
+            truncated = " ".join(words[:300])
             # Find last sentence end within the truncated text
             last_period = truncated.rfind(".")
             last_question = truncated.rfind("?")
