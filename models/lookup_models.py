@@ -1,11 +1,12 @@
 """MCP IoC lookup result models for the RoadBlock pipeline."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from models import APP_TIMEZONE
 from models.ioc_models import IoCCategory
 
 
@@ -55,7 +56,7 @@ class IoCLookupResult(BaseModel):
         description="Classification tags for this IoC",
     )
     lookup_timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the lookup was performed",
     )
     lookup_duration_ms: Optional[float] = Field(
