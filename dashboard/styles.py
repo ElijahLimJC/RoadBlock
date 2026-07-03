@@ -10,167 +10,229 @@ def inject_custom_css() -> None:
 
 _CUSTOM_CSS = """
 <style>
-/* Dark accent header bar */
+/* Tighter top padding */
 .main .block-container {
-    padding-top: 1rem;
+    padding-top: 0.5rem;
+    max-width: 1200px;
 }
 
-/* Metric cards */
-div[data-testid="stMetric"] {
-    background-color: #1e1e2e;
+/* --- Hero Block --- */
+.roadblock-hero {
+    background: linear-gradient(135deg, #1e1e2e 0%, #11111b 100%);
     border: 1px solid #313244;
-    border-radius: 8px;
-    padding: 12px 16px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    border-radius: 12px;
+    padding: 24px 32px 16px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.hero-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #cdd6f4;
+    margin: 0 0 2px;
+}
+
+.hero-subtitle {
+    font-size: 0.85rem;
+    color: #6c7086;
+    margin: 0 0 14px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.hero-status {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+/* --- Status pills --- */
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    border-radius: 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.status-connected {
+    background: rgba(166, 227, 161, 0.12);
+    color: #a6e3a1;
+    border: 1px solid rgba(166, 227, 161, 0.3);
+}
+
+.status-disconnected {
+    background: rgba(243, 139, 168, 0.12);
+    color: #f38ba8;
+    border: 1px solid rgba(243, 139, 168, 0.3);
+}
+
+.status-idle {
+    background: rgba(137, 180, 250, 0.10);
+    color: #89b4fa;
+    border: 1px solid rgba(137, 180, 250, 0.25);
+}
+
+.status-running {
+    background: rgba(249, 226, 175, 0.12);
+    color: #f9e2af;
+    border: 1px solid rgba(249, 226, 175, 0.3);
+}
+
+/* --- Section headers --- */
+.section-header {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #a6adc8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin: 20px 0 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #313244;
+}
+
+/* --- Metric cards --- */
+div[data-testid="stMetric"] {
+    background: #181825;
+    border: 1px solid #313244;
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: border-color 0.2s ease;
+}
+
+div[data-testid="stMetric"]:hover {
+    border-color: #45475a;
 }
 
 div[data-testid="stMetric"] label {
-    color: #a6adc8;
-    font-size: 0.85rem;
+    color: #6c7086;
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 div[data-testid="stMetric"] [data-testid="stMetricValue"] {
     color: #cdd6f4;
-    font-weight: 600;
+    font-weight: 700;
+    font-size: 1.6rem;
 }
 
-/* Chat bubbles */
+/* --- Chat bubbles --- */
 .chat-scammer {
-    background: linear-gradient(135deg, #45243c 0%, #3b1f34 100%);
+    background: linear-gradient(135deg, #302030 0%, #281a28 100%);
     border-left: 3px solid #f38ba8;
-    border-radius: 0 12px 12px 12px;
+    border-radius: 0 10px 10px 10px;
     padding: 10px 14px;
-    margin: 6px 0;
+    margin: 5px 0;
     color: #f5e0dc;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
+    line-height: 1.4;
 }
 
 .chat-persona {
-    background: linear-gradient(135deg, #1e3a2e 0%, #1a332a 100%);
+    background: linear-gradient(135deg, #1a2e24 0%, #162820 100%);
     border-left: 3px solid #a6e3a1;
-    border-radius: 12px 0 12px 12px;
+    border-radius: 10px 0 10px 10px;
     padding: 10px 14px;
-    margin: 6px 0;
+    margin: 5px 0;
     color: #d9f2d0;
-    font-size: 0.9rem;
+    font-size: 0.88rem;
+    line-height: 1.4;
 }
 
 .chat-sender {
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin-bottom: 4px;
-    opacity: 0.8;
+    font-size: 0.7rem;
+    font-weight: 700;
+    margin-bottom: 3px;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
 
 .chat-time {
-    font-size: 0.7rem;
-    opacity: 0.5;
+    font-size: 0.65rem;
+    opacity: 0.4;
     margin-top: 4px;
 }
 
-/* IoC badges */
+/* --- IoC badges --- */
 .ioc-badge {
     display: inline-block;
     padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 700;
     margin-left: 6px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
 }
 
 .ioc-new {
-    background: #1e4620;
+    background: rgba(166, 227, 161, 0.15);
     color: #a6e3a1;
-    border: 1px solid #40a02b;
+    border: 1px solid rgba(64, 160, 43, 0.4);
 }
 
 .ioc-known {
-    background: #4a3f00;
+    background: rgba(249, 226, 175, 0.15);
     color: #f9e2af;
-    border: 1px solid #df8e1d;
+    border: 1px solid rgba(223, 142, 29, 0.4);
 }
 
 .ioc-unknown {
-    background: #1e2a3a;
+    background: rgba(137, 180, 250, 0.12);
     color: #89b4fa;
-    border: 1px solid #3b82f6;
+    border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
-/* Status pills */
-.status-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 12px;
-    border-radius: 16px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.status-connected {
-    background: #1e4620;
-    color: #a6e3a1;
-}
-
-.status-disconnected {
-    background: #4a1a1a;
-    color: #f38ba8;
-}
-
-.status-idle {
-    background: #1e2a3a;
-    color: #89b4fa;
-}
-
-.status-running {
-    background: #3a2e1e;
-    color: #f9e2af;
-}
-
-/* Notification cards */
+/* --- Notification cards --- */
 .notif-card {
     border-radius: 8px;
     padding: 10px 14px;
-    margin: 6px 0;
+    margin: 5px 0;
     border-left: 3px solid;
+    font-size: 0.85rem;
+    line-height: 1.4;
 }
 
-.notif-critical { border-color: #f38ba8; background: #2a1520; }
-.notif-high { border-color: #fab387; background: #2a2015; }
-.notif-medium { border-color: #f9e2af; background: #2a2810; }
-.notif-low { border-color: #a6e3a1; background: #152a1e; }
+.notif-critical { border-color: #f38ba8; background: rgba(243, 139, 168, 0.08); }
+.notif-high { border-color: #fab387; background: rgba(250, 179, 135, 0.08); }
+.notif-medium { border-color: #f9e2af; background: rgba(249, 226, 175, 0.08); }
+.notif-low { border-color: #a6e3a1; background: rgba(166, 227, 161, 0.08); }
 
-/* Sidebar styling */
+/* --- Sidebar --- */
 section[data-testid="stSidebar"] {
     background-color: #11111b;
 }
 
-section[data-testid="stSidebar"] .stMetric {
-    background-color: #181825;
+/* --- Expander styling --- */
+div[data-testid="stExpander"] {
     border: 1px solid #313244;
-    border-radius: 6px;
-    padding: 8px;
+    border-radius: 8px;
+    margin-bottom: 6px;
 }
 
-/* Header branding */
-.roadblock-header {
-    background: linear-gradient(135deg, #1e1e2e 0%, #181825 100%);
-    border: 1px solid #313244;
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-    text-align: center;
+div[data-testid="stExpander"] summary {
+    font-weight: 600;
+    font-size: 0.85rem;
 }
 
-.roadblock-header h1 {
-    margin: 0;
-    font-size: 1.8rem;
+/* --- Divider subtlety --- */
+hr {
+    border-color: #313244;
+    opacity: 0.5;
+    margin: 16px 0;
 }
 
-.roadblock-header p {
-    margin: 4px 0 0;
-    opacity: 0.7;
-    font-size: 0.9rem;
+/* Reduce gap between metric columns */
+div[data-testid="stHorizontalBlock"] {
+    gap: 0.6rem;
 }
 </style>
 """

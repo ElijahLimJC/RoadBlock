@@ -27,8 +27,6 @@ class SOCDashboard:
         """
         import streamlit as st
 
-        st.title("🛡️ RoadBlock SOC Dashboard")
-
         # Error banner if parser is in error state
         parser_status = chat_state.get("parser_status", "idle")
         last_error = chat_state.get("last_error")
@@ -37,24 +35,36 @@ class SOCDashboard:
 
         # Metrics section
         metrics = chat_state.get("metrics", {})
+        st.markdown(
+            '<div class="section-header">Session Metrics</div>',
+            unsafe_allow_html=True,
+        )
         self.render_metrics(metrics, chat_state)
 
-        st.divider()
-
         # Two-column layout: conversation log and IoC panel
-        col_left, col_right = st.columns(2)
+        col_left, col_right = st.columns([3, 2])
 
         with col_left:
+            st.markdown(
+                '<div class="section-header">Conversation Log</div>',
+                unsafe_allow_html=True,
+            )
             messages = chat_state.get("conversation_history", [])
             self.render_conversation_log(messages)
 
         with col_right:
+            st.markdown(
+                '<div class="section-header">Indicators of Compromise</div>',
+                unsafe_allow_html=True,
+            )
             iocs = chat_state.get("iocs", {})
             self.render_ioc_panel(iocs, chat_state)
 
-        st.divider()
-
         # Notification log
+        st.markdown(
+            '<div class="section-header">Notifications</div>',
+            unsafe_allow_html=True,
+        )
         notifications = chat_state.get("notifications", [])
         self.render_notification_log(notifications)
 
@@ -171,17 +181,8 @@ class SOCDashboard:
     def render_metrics(
         self, metrics: dict[str, Any] | Any, chat_state: dict[str, Any] | None = None
     ) -> None:
-        """Display turn count, Total Scammer Time Wasted, and IoC counts.
-
-        Metrics displayed:
-        - Turn count
-        - Total Scammer Time Wasted (HH:MM:SS)
-        - IoC counts per category
-        - Known vs New IoC counts
-        """
+        """Display turn count, Total Scammer Time Wasted, and IoC counts."""
         import streamlit as st
-
-        st.subheader("📊 Session Metrics")
 
         # Extract metric values defensively
         if isinstance(metrics, dict):
@@ -189,7 +190,6 @@ class SOCDashboard:
             start_time = metrics.get("start_time")
             last_message_time = metrics.get("last_message_time")
         else:
-            # Pydantic model or similar object
             turn_count = getattr(metrics, "turn_count", 0)
             start_time = getattr(metrics, "start_time", None)
             last_message_time = getattr(metrics, "last_message_time", None)
@@ -209,10 +209,10 @@ class SOCDashboard:
         known_count = chat_state.get("known_ioc_count", 0)
         new_count = chat_state.get("new_ioc_count", 0)
 
-        # Render metrics in columns
+        # Row 1: Primary engagement metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Turn Count", turn_count)
+            st.metric("Turns", turn_count)
         with col2:
             st.metric("Time Wasted", time_wasted)
         with col3:
@@ -220,16 +220,16 @@ class SOCDashboard:
         with col4:
             st.metric("New IoCs", new_count)
 
-        # IoC counts per category
+        # Row 2: IoC breakdown by category
         col5, col6, col7, col8 = st.columns(4)
         with col5:
-            st.metric("💰 Wallets", crypto_count)
+            st.metric("Wallets", crypto_count)
         with col6:
-            st.metric("🌐 Domains", domain_count)
+            st.metric("Domains", domain_count)
         with col7:
-            st.metric("📞 Phones", phone_count)
+            st.metric("Phones", phone_count)
         with col8:
-            st.metric("🏦 Mule Accts", mule_count)
+            st.metric("Mule Accts", mule_count)
 
     def render_email_ingestion_panel(self, chat_state: dict[str, Any]) -> None:
         """Render email ingestion status: connection, counts, and degraded warning.
