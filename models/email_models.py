@@ -1,8 +1,10 @@
 """Email ingestion Pydantic models for RoadBlock scam detection pipeline."""
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal, Optional
+
+from models import APP_TIMEZONE
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -29,7 +31,7 @@ class EmailMessage(BaseModel):
         default="", description="Date header value"
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the email was received",
     )
 
@@ -88,7 +90,7 @@ class ClassificationResult(BaseModel):
         description="LLM reasoning for Stage 2 decisions",
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When classification occurred",
     )
     sender: str = Field(default="", description="Email sender address")
@@ -142,7 +144,7 @@ class OutboundEmail(BaseModel):
         default=0, ge=0, description="Number of delivery attempts"
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the email was queued",
     )
     last_attempt_at: Optional[datetime] = Field(
