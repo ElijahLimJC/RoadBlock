@@ -509,7 +509,7 @@ def _run_extraction_pipeline(
                             virustotal_client.batch_lookup(
                                 extraction_result.iocs, cache
                             ),
-                            timeout=30.0,
+                            timeout=60.0,
                         )
                     )
                 finally:
@@ -517,7 +517,7 @@ def _run_extraction_pipeline(
                 state["vt_lookup_cache"] = cache
                 state["vt_server_status"] = "connected"
             except asyncio.TimeoutError:
-                logger.warning("VirusTotal batch lookup timed out after 30s")
+                logger.warning("VirusTotal batch lookup timed out after 60s")
                 state["vt_server_status"] = "timeout"
             except Exception as e:
                 logger.warning("VirusTotal batch lookup failed: %s", e)
