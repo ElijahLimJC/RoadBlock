@@ -323,6 +323,7 @@ def process_scammer_message(
         virustotal_client: VirusTotalMCPClient instance (optional, skips VT if None).
     """
     pipeline_start = time.time()
+    print(f"[PIPELINE] process_scammer_message called with: {raw_message[:50]}...")
 
     # Initialize components with defaults if not provided
     if safety_filter is None:
