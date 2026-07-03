@@ -4,7 +4,7 @@ import os
 
 import streamlit as st
 
-from app import initialize_chat_state, process_scammer_message
+from pipeline import initialize_chat_state, process_scammer_message
 from components.persona_engine import PersonaEngine
 from dashboard.soc_dashboard import SOCDashboard
 from dashboard.styles import inject_custom_css
