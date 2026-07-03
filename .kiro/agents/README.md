@@ -1,40 +1,97 @@
----
-name: roadblock-ensemble
-description: Roster and workflow summary for the multi-agent development framework adapted for RoadBlock.
-version: 1.0.0
----
-
 # RoadBlock Agent Ensemble
 
-Orchestrated multi-agent development workflow for the RoadBlock honeypot pipeline.
+Multi-agent development framework for the RoadBlock honeypot pipeline. Each agent has a specific role and set of permissions to enforce separation of concerns.
 
-## Roster
+## Agents
 
-| Agent | Role |
-|-------|------|
-| **team-lead** | Orchestrates workflow, delegates tasks, manages commits |
-| **builder** | Implements tasks, commits, runs sync-specs |
-| **validator** | Verifies against spec + pytest + ruff (read-only) |
-| **reviewer** | Code review against main, reports findings (read-only) |
-| **documenter** | Incremental docs in app_docs/ |
+### team-lead
+**Role:** Orchestrator and decision-maker
 
-## Workflow Summary
+- Receives user requests and breaks them into delegatable tasks
+- Creates branches, manages TODO lists, coordinates workflow
+- Delegates implementation to builder, verification to validator
+- Owns commit strategy and PR creation
+- Formats acceptance criteria in EARS syntax
+- Never writes application code directly
 
-1. Load spec + repo steering + domain context
-2. Branch setup
-3. Create TODO list
-4. Per task: builder → validator → commit → documenter
-5. Code review (reviewer)
-6. Sync specs (builder)
-7. Final commits + push
-8. PR creation (GitHub CLI)
-9. Execution report + session log
+### builder
+**Role:** Implementation engine
 
-## Key Paths
+- Executes ONE task at a time from the team-lead's plan
+- Writes code, creates files, runs build commands
+- Follows steering rules and coding conventions strictly
+- Commits after each completed task
+- No spec creation, no EARS formatting
 
-- Specs: `.kiro/specs/{feature}/`
-- Repo steering: `.kiro/steering/`
-- Settings: `.kiro/settings/git-convention.json`
-- Hooks: `.kiro/hooks/`
-- Skills: `.kiro/skills/`
-- Templates: `.kiro/templates/`
+### validator
+**Role:** Read-only quality gate
+
+- Verifies task completion against acceptance criteria
+- Runs pytest, ruff, mypy
+- Checks property-based test coverage
+- Reports pass/fail with evidence
+- Never modifies code or creates files
+
+### reviewer
+**Role:** Code review
+
+- Analyzes diffs between current branch and main
+- Validates style guide compliance (conventions.md)
+- Reports findings with file/line references
+- Never modifies code
+
+### documenter
+**Role:** Documentation writer
+
+- Generates docs for completed and validated features
+- Writes prose documentation only
+- No EARS, no code changes, no spec creation
+
+### critic
+**Role:** Harsh evaluator
+
+- Reviews implementations against formal spec requirements
+- Checks design principles and EARS acceptance criteria
+- Provides honest assessment of whether work satisfies specs
+- Use when you need a second opinion on quality
+
+### design-system-architect
+**Role:** UI/theming specialist
+
+- Design tokens, component libraries, theming infrastructure
+- Scalable design operations and multi-brand systems
+- Used for dashboard styling and visual architecture decisions
+
+## Workflow
+
+```
+User Request
+    |
+    v
+[team-lead] --> creates plan, branches
+    |
+    v
+[builder] --> implements task
+    |
+    v
+[validator] --> verifies against spec
+    |
+    v
+[reviewer] --> code review
+    |
+    v
+[documenter] --> updates docs
+    |
+    v
+[team-lead] --> commits, pushes, creates PR
+```
+
+## Files
+
+Each agent has:
+- `{name}.json` - Agent configuration (tools, permissions)
+- `{name}-prompt.md` - System prompt defining behavior and constraints
+
+Standalone agents (no .json):
+- `critic.md` - Inline prompt definition
+- `design-system-architect.md` - Inline prompt definition
