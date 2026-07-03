@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from mcp import ClientSession, StdioServerParameters
@@ -402,7 +402,7 @@ class VirusTotalMCPClient:
                 reporting_sources=reporting_sources,
                 severity_assessment=severity,
                 tags=tags,
-                lookup_timestamp=datetime.now(timezone.utc),
+                lookup_timestamp=datetime.now(APP_TIMEZONE),
                 lookup_duration_ms=elapsed_ms,
             )
 
@@ -417,7 +417,7 @@ class VirusTotalMCPClient:
                 is_known=False,
                 reporting_sources=["VirusTotal"],
                 tags=["virustotal", "parse_error"],
-                lookup_timestamp=datetime.now(timezone.utc),
+                lookup_timestamp=datetime.now(APP_TIMEZONE),
                 lookup_duration_ms=elapsed_ms,
             )
 
@@ -434,7 +434,7 @@ class VirusTotalMCPClient:
             ioc_category=ioc_category,
             lookup_status=LookupStatus.UNKNOWN,
             is_known=False,
-            lookup_timestamp=datetime.now(timezone.utc),
+            lookup_timestamp=datetime.now(APP_TIMEZONE),
             lookup_duration_ms=elapsed_ms,
         )
         if cache is not None:
