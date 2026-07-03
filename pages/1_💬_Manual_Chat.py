@@ -22,13 +22,61 @@ st.markdown(
 )
 
 # --- Input Form ---
+_prefill = st.session_state.pop("_preset_message", "")
 with st.form("scammer_input_form", clear_on_submit=True):
     raw_message = st.text_area(
         "Enter scammer message:",
+        value=_prefill,
         height=150,
         placeholder="Paste or type a scammer message here...",
     )
-    submitted = st.form_submit_button("🚀 Process Message", width="stretch")
+    submitted = st.form_submit_button("🚀 Process Message", use_container_width=True)
+
+# --- Golden Path Presets (for demo/judging) ---
+with st.expander("📋 Sample Scammer Messages (click to auto-fill)", expanded=False):
+    _PRESETS = [
+        (
+            "🏦 Bank Transfer Scam",
+            "Dear valued customer, your account has been compromised. "
+            "Please transfer your remaining balance to our secure holding "
+            "account at Chase Bank, routing number 021000021, account "
+            "1234567890 immediately to prevent further unauthorized access.",
+        ),
+        (
+            "💰 Crypto Investment Scam",
+            "Hello! I am a senior investment advisor. Send 0.5 BTC to "
+            "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa and I will return 5 BTC "
+            "within 24 hours. This is a verified Binance promotion. "
+            "You can also visit claim-btc-reward.com to verify.",
+        ),
+        (
+            "📞 Tech Support Scam",
+            "URGENT: Your computer has been infected with a trojan virus! "
+            "Call our Microsoft certified technicians immediately at "
+            "+1-888-555-0147. Visit fix-your-pc-now.net to download our "
+            "remote access tool. Your Windows license will be revoked in "
+            "24 hours if you do not comply.",
+        ),
+        (
+            "🎁 Lottery / Prize Scam",
+            "Congratulations! You have won $2,500,000 in the International "
+            "Online Lottery. To claim your prize, send a processing fee of "
+            "0.1 ETH to 0x71C7656EC7ab88b098defB751B7401B5f6d8976F or wire "
+            "transfer $500 to Wells Fargo routing 121000248 account "
+            "9876543210. Contact us at prizes@lottery-winner-intl.com.",
+        ),
+        (
+            "🔓 Account Phishing",
+            "We detected suspicious login to your PayPal account from "
+            "Nigeria. Click here to verify: paypal-secure-login.xyz/verify "
+            "If you do not verify within 2 hours, your account will be "
+            "permanently locked. Call +44-20-7946-0958 for support.",
+        ),
+    ]
+    for label, preset_msg in _PRESETS:
+        if st.button(label, key=f"preset_{label}", use_container_width=True):
+            st.session_state["_preset_message"] = preset_msg
+            st.rerun()
 
 if submitted and raw_message.strip():
     with st.spinner("Processing message through pipeline..."):
