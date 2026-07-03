@@ -22,18 +22,16 @@ st.markdown(
 )
 
 # --- Input Form ---
-_prefill = st.session_state.pop("_preset_message", "")
 with st.form("scammer_input_form", clear_on_submit=True):
     raw_message = st.text_area(
         "Enter scammer message:",
-        value=_prefill,
         height=150,
         placeholder="Paste or type a scammer message here...",
     )
     submitted = st.form_submit_button("🚀 Process Message", use_container_width=True)
 
 # --- Golden Path Presets (for demo/judging) ---
-with st.expander("📋 Sample Scammer Messages (click to auto-fill)", expanded=False):
+with st.expander("📋 Sample Scammer Messages (click to send)", expanded=False):
     _PRESETS = [
         (
             "🏦 Bank Transfer Scam",
@@ -75,8 +73,34 @@ with st.expander("📋 Sample Scammer Messages (click to auto-fill)", expanded=F
     ]
     for label, preset_msg in _PRESETS:
         if st.button(label, key=f"preset_{label}", use_container_width=True):
-            st.session_state["_preset_message"] = preset_msg
+            st.session_state["_pending_preset"] = preset_msg
             st.rerun()
+
+# --- Process pending preset automatically ---
+if "_pending_preset" in st.session_state:
+    _preset_to_send = st.session_state.pop("_pending_preset")
+    with st.spinner("Processing preset message through pipeline..."):
+        persona = None
+        mistral_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+        if mistral_key:
+            try:
+                import httpx
+                from mistralai.client import Mistral
+
+                ssl_verify = os.environ.get("ROADBLOCK_SSL_VERIFY", "true").lower() != "false"
+                http_client = httpx.Client(verify=ssl_verify)
+                client = Mistral(api_key=mistral_key, client=http_client)
+                persona = PersonaEngine(llm_client=client)
+            except Exception:
+                pass
+        if persona is None:
+            persona = PersonaEngine(llm_client=None)
+
+        process_scammer_message(
+            raw_message=_preset_to_send,
+            persona_engine=persona,
+        )
+    st.rerun()
 
 if submitted and raw_message.strip():
     with st.spinner("Processing message through pipeline..."):
