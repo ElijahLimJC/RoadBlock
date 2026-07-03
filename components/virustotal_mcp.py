@@ -19,6 +19,7 @@ from typing import Optional
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from models import APP_TIMEZONE
 from models.ioc_models import BaseIoC, IoCCategory
 from models.lookup_models import IoCLookupResult, LookupStatus
 
@@ -338,7 +339,7 @@ class VirusTotalMCPClient:
                     reporting_sources=["VirusTotal"],
                     severity_assessment="malicious" if is_known else "clean",
                     tags=["virustotal"],
-                    lookup_timestamp=datetime.now(timezone.utc),
+                    lookup_timestamp=datetime.now(APP_TIMEZONE),
                     lookup_duration_ms=elapsed_ms,
                 )
 
@@ -386,7 +387,7 @@ class VirusTotalMCPClient:
             creation_date = attributes.get("creation_date")
             if creation_date and isinstance(creation_date, (int, float)):
                 first_seen = datetime.fromtimestamp(
-                    creation_date, tz=timezone.utc
+                    creation_date, tz=APP_TIMEZONE
                 )
 
             lookup_status = LookupStatus.KNOWN if is_known else LookupStatus.NEW
