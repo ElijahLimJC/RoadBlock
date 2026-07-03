@@ -20,7 +20,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from components.email_ingestion import EmailIngestionModule
 from components.imap_client import IMAPClient
-from components.ioc_lookup_mcp import IoCLookupMCPClient
 from components.virustotal_mcp import VirusTotalMCPClient
 from components.notification_module import NotificationModule
 from components.persona_engine import PersonaEngine
@@ -94,8 +93,7 @@ def initialize_chat_state() -> None:
         "rejection_log": [],
         "parser_status": "idle",
         "last_error": None,
-        "mcp_lookup_cache": {},
-        "mcp_server_status": "unknown",
+        "vt_lookup_cache": {},
         "vt_server_status": "unknown",
         "known_ioc_count": 0,
         "new_ioc_count": 0,
@@ -302,7 +300,6 @@ def process_scammer_message(
     persona_engine: Optional[PersonaEngine] = None,
     stalling_tracker: Optional[StallingTracker] = None,
     threat_parser: Optional[ThreatParser] = None,
-    mcp_client: Optional[IoCLookupMCPClient] = None,
     notification_module: Optional[NotificationModule] = None,
     virustotal_client: Optional[VirusTotalMCPClient] = None,
 ) -> PipelineResult:
@@ -314,7 +311,7 @@ def process_scammer_message(
     3. Update Chat_State with message pair
     4. Stalling_Tracker.record_turn()
     5. Threat_Parser extraction (direct call, synchronous)
-    6. On extraction complete: MCP lookup -> notifications for NEW IoCs
+    6. On extraction complete: VirusTotal lookup -> notifications for NEW IoCs
 
     Args:
         raw_message: The raw scammer input text.
@@ -322,7 +319,6 @@ def process_scammer_message(
         persona_engine: PersonaEngine instance (created if None).
         stalling_tracker: StallingTracker instance (created if None).
         threat_parser: ThreatParser instance (uses session singleton if None).
-        mcp_client: IoCLookupMCPClient instance (optional, skips MCP if None).
         notification_module: NotificationModule instance (created if None).
         virustotal_client: VirusTotalMCPClient instance (optional, skips VT if None).
     """
@@ -444,7 +440,6 @@ def process_scammer_message(
         _run_extraction_pipeline(
             message_for_extraction,
             threat_parser,
-            mcp_client,
             notification_module,
             st.session_state,
             virustotal_client,
@@ -465,7 +460,6 @@ def process_scammer_message(
 def _run_extraction_pipeline(
     message: str,
     threat_parser: ThreatParser,
-    mcp_client: Optional[IoCLookupMCPClient],
     notification_module: NotificationModule,
     state: Any = None,
     virustotal_client: Optional[VirusTotalMCPClient] = None,
@@ -474,15 +468,13 @@ def _run_extraction_pipeline(
 
     Executes:
     1. ThreatParser.extract_iocs(message)
-    2. MCP lookup for each extracted IoC
-    3. VirusTotal MCP enrichment for each extracted IoC
-    4. Generate notifications for NEW IoCs only
-    5. Update Chat_State with results
+    2. VirusTotal MCP enrichment for each extracted IoC
+    3. Generate notifications for NEW IoCs only
+    4. Update Chat_State with results
 
     Args:
         message: The raw message to extract IoCs from.
         threat_parser: ThreatParser instance.
-        mcp_client: Optional MCP client for IoC lookups.
         notification_module: NotificationModule for generating alerts.
         state: Session state reference.
         virustotal_client: Optional VirusTotal MCP client for enrichment.
@@ -504,33 +496,10 @@ def _run_extraction_pipeline(
             state["parser_status"] = "idle"
             return
 
-        # --- MCP Lookup for each IoC ---
-        cache = state.get("mcp_lookup_cache", {})
-        lookup_results = []
-
-        if mcp_client is not None:
-            try:
-                loop = asyncio.new_event_loop()
-                try:
-                    lookup_results = loop.run_until_complete(
-                        asyncio.wait_for(
-                            mcp_client.batch_check(extraction_result.iocs, cache),
-                            timeout=30.0,
-                        )
-                    )
-                finally:
-                    loop.close()
-                state["mcp_lookup_cache"] = cache
-                state["mcp_server_status"] = "connected"
-            except asyncio.TimeoutError:
-                logger.warning("MCP batch lookup timed out after 30s")
-                state["mcp_server_status"] = "disconnected"
-            except Exception as e:
-                logger.warning("MCP batch lookup failed: %s", e)
-                state["mcp_server_status"] = "disconnected"
-
         # --- VirusTotal MCP enrichment ---
+        cache = state.get("vt_lookup_cache", {})
         vt_results = []
+
         if virustotal_client is not None and virustotal_client.is_configured():
             try:
                 vt_loop = asyncio.new_event_loop()
@@ -545,7 +514,7 @@ def _run_extraction_pipeline(
                     )
                 finally:
                     vt_loop.close()
-                state["mcp_lookup_cache"] = cache
+                state["vt_lookup_cache"] = cache
                 state["vt_server_status"] = "connected"
             except asyncio.TimeoutError:
                 logger.warning("VirusTotal batch lookup timed out after 30s")
@@ -557,10 +526,7 @@ def _run_extraction_pipeline(
         # --- Store IoCs and generate notifications for NEW ones ---
         for i, ioc in enumerate(extraction_result.iocs):
             is_known = False
-            if i < len(lookup_results):
-                is_known = lookup_results[i].is_known
-            # Also check VT results — if either source says known, treat as known
-            if not is_known and i < len(vt_results):
+            if i < len(vt_results):
                 is_known = vt_results[i].is_known
 
             # Store IoC (deduplicates by extracted_value)
