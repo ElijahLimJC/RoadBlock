@@ -1,7 +1,8 @@
 """Mock AWS payload models for GuardDuty findings and WAF IP set updates."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
+from models import APP_TIMEZONE
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -16,7 +17,7 @@ class MockAWSPayload(BaseModel):
         description="Type of AWS payload (guardduty_finding or waf_ipset_update)"
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the payload was generated",
     )
     severity: str = Field(
@@ -79,6 +80,6 @@ class GuardDutyFinding(BaseModel):
     Title: str = Field(description="Finding title")
     Description: str = Field(description="Detailed finding description")
     CreatedAt: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the finding was created",
     )
