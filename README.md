@@ -130,6 +130,16 @@ Scammer Message
 - Session-level caching to avoid duplicate API calls
 - Graceful degradation on timeout/error
 
+### Mock AWS Notifications (GuardDuty + WAF)
+- Generates **GuardDuty findings** for extracted IoCs routed by category:
+  - Crypto wallets → HIGH severity (`CryptoCurrency:EC2/BitcoinTool.B`)
+  - Mule bank accounts → CRITICAL severity (`UnauthorizedAccess:IAMUser/InstanceCredentialExfiltration`)
+  - Phone numbers → MEDIUM severity (`Recon:EC2/PortProbeUnprotectedPort`)
+- Generates **WAF UpdateIPSet payloads** for phishing domains (REGIONAL scope IP set blocking)
+- Only fires notifications for NEW IoCs (deduplication via session state)
+- Payloads follow real AWS JSON schemas for integration pattern validation
+- Displayed in the SOC dashboard notification feed in real time
+
 ### Email Ingestion
 - IMAP polling with configurable interval
 - Two-stage scam classification (regex patterns + optional LLM)
