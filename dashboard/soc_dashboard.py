@@ -342,18 +342,36 @@ class SOCDashboard:
 
 def _render_ioc_badge(st_module: Any, ioc: Any) -> None:
     """Render an IoC value with a styled badge indicating known/new status."""
+    import streamlit as _st
+
     value = _get_field(ioc, "extracted_value", "N/A")
     value = html.escape(str(value))
-    status = _get_known_status(ioc)
-    if "New" in status:
-        badge_class = "ioc-new"
-        badge_label = "NEW"
-    elif "Known" in status:
-        badge_class = "ioc-known"
-        badge_label = "KNOWN"
+
+    # Check VT lookup cache for known status
+    vt_cache = _st.session_state.get("vt_lookup_cache", {})
+    cached_result = vt_cache.get(value if isinstance(value, str) else str(value))
+
+    if cached_result is not None:
+        is_known = _get_field(cached_result, "is_known", False)
+        if is_known:
+            badge_class = "ioc-known"
+            badge_label = "KNOWN"
+        else:
+            badge_class = "ioc-new"
+            badge_label = "NEW"
     else:
-        badge_class = "ioc-unknown"
-        badge_label = "UNKNOWN"
+        # Fallback to lookup_result field on the IoC itself
+        status = _get_known_status(ioc)
+        if "New" in status:
+            badge_class = "ioc-new"
+            badge_label = "NEW"
+        elif "Known" in status:
+            badge_class = "ioc-known"
+            badge_label = "KNOWN"
+        else:
+            badge_class = "ioc-unknown"
+            badge_label = "UNKNOWN"
+
     st_module.markdown(
         f'<code>{value}</code> '
         f'<span class="ioc-badge {badge_class}">'
