@@ -1,11 +1,13 @@
 """IoC Pydantic models for RoadBlock threat intelligence extraction."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from models import APP_TIMEZONE
 
 
 class IoCCategory(str, Enum):
@@ -42,7 +44,7 @@ class BaseIoC(BaseModel):
         description="Source message text containing the IoC"
     )
     extracted_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="Timestamp when IoC was extracted",
     )
     confidence: float = Field(

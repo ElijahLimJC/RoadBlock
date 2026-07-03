@@ -1,10 +1,11 @@
 """Chat and session models for RoadBlock pipeline."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from models import APP_TIMEZONE
 from models.ioc_models import BaseIoC, IoCCategory
 
 
@@ -18,7 +19,7 @@ class ChatMessage(BaseModel):
     )
     content: str = Field(description="Message text content")
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the message was sent",
     )
     was_sanitized: bool = Field(
@@ -76,7 +77,7 @@ class RejectionLogEntry(BaseModel):
         description="IoC category the candidate was evaluated for"
     )
     timestamp: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the rejection occurred",
     )
 
