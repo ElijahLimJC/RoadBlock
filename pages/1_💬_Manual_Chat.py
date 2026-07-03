@@ -61,15 +61,19 @@ last_error = st.session_state.get("last_error")
 if last_error:
     st.error(f"Last pipeline error: {last_error}")
 
-# --- Debug: VT and IoC status ---
+# --- Pipeline status ---
 vt_status = st.session_state.get("vt_server_status", "unknown")
 vt_client = st.session_state.get("virustotal_client")
 iocs = st.session_state.get("iocs", {})
 total_iocs = sum(len(v) for v in iocs.values())
-st.caption(
-    f"VT status: {vt_status} | VT client: {'configured' if vt_client and vt_client.is_configured() else 'None'} | "
-    f"IoCs extracted: {total_iocs} | Parser: {st.session_state.get('parser_status', 'unknown')}"
-)
+known_count = st.session_state.get("known_ioc_count", 0)
+new_count = st.session_state.get("new_ioc_count", 0)
+
+if total_iocs > 0:
+    st.success(
+        f"IoCs extracted: {total_iocs} | Known: {known_count} | New: {new_count} | "
+        f"VT: {vt_status}"
+    )
 
 # --- Conversation Log ---
 st.divider()
