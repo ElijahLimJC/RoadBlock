@@ -85,7 +85,7 @@ st.markdown(
 )
 
 # --- Status Indicators Row ---
-status_col1, status_col2, status_col3 = st.columns(3)
+status_col1, status_col2, status_col3, status_col4 = st.columns(4)
 
 with status_col1:
     parser_status = st.session_state.get("parser_status", "idle")
@@ -127,6 +127,33 @@ with status_col2:
             unsafe_allow_html=True,
         )
 with status_col3:
+    vt_status = st.session_state.get("vt_server_status", "unknown")
+    vt_configured = st.session_state.get("virustotal_client") is not None
+    if vt_status == "connected":
+        st.markdown(
+            '<span class="status-pill status-connected">'
+            '● VT: Connected</span>',
+            unsafe_allow_html=True,
+        )
+    elif vt_status in ("timeout", "error"):
+        st.markdown(
+            '<span class="status-pill status-disconnected">'
+            '● VT: Error</span>',
+            unsafe_allow_html=True,
+        )
+    elif vt_configured:
+        st.markdown(
+            '<span class="status-pill status-idle">'
+            '○ VT: Ready</span>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<span class="status-pill status-disconnected">'
+            '○ VT: No API key</span>',
+            unsafe_allow_html=True,
+        )
+with status_col4:
     if st.session_state.get("email_ingestion_module") is not None:
         email_status = st.session_state.email_ingestion.get(
             "connection_status", "disconnected"

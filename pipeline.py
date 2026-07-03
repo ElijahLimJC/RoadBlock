@@ -107,6 +107,15 @@ def initialize_chat_state() -> None:
     if "threat_parser_instance" not in st.session_state:
         st.session_state["threat_parser_instance"] = ThreatParser()
 
+    if "virustotal_client" not in st.session_state:
+        vt_client = VirusTotalMCPClient()
+        if vt_client.is_configured():
+            st.session_state["virustotal_client"] = vt_client
+            logger.info("VirusTotal MCP client initialized")
+        else:
+            st.session_state["virustotal_client"] = None
+            logger.info("VirusTotal API key not configured, VT enrichment disabled")
+
     # Email ingestion state (Task 9.1)
     if "email_ingestion" not in st.session_state:
         st.session_state.email_ingestion = {
@@ -330,6 +339,8 @@ def process_scammer_message(
         )
     if notification_module is None:
         notification_module = NotificationModule()
+    if virustotal_client is None:
+        virustotal_client = st.session_state.get("virustotal_client")
 
     # --- Stage 1: Safety Filter ---
     scan_result = None
