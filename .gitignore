@@ -14,8 +14,9 @@ env/
 # Hypothesis test database
 .hypothesis/
 
-# pytest cache
+# cache
 .pytest_cache/
+logs/
 
 # Environment variables
 .env
@@ -27,4 +28,3 @@ env/
 # OS
 .DS_Store
 Thumbs.db
-.kiro/settings/mcp.json

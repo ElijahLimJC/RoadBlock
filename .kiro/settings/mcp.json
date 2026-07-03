@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "puppeteer": {
+      "command": "npx",
+      "args": ["-y", "puppeteer-mcp-server"],
+      "disabled": false
+    },
+    "RoadBlock-adversary": {
+      "command": "roadblock\\Scripts\\python",
+      "args": ["settings\\mcp\\jailbreak_server.py"],
+      "disabled": false
+    }
+  }
+}
