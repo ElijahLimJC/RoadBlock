@@ -69,16 +69,11 @@ class SOCDashboard:
         self.render_notification_log(notifications)
 
     def render_conversation_log(self, messages: list[dict[str, Any]]) -> None:
-        """Display chat messages with sender attribution and timestamps.
-
-        Messages are displayed in chronological order as styled chat bubbles.
-        """
+        """Display chat messages with sender attribution and timestamps."""
         import streamlit as st
 
-        st.subheader("💬 Conversation Log")
-
         if not messages:
-            st.info("No messages yet. Waiting for scammer engagement...")
+            st.caption("No messages yet. Waiting for scammer engagement...")
             return
 
         for msg in messages:
@@ -123,14 +118,8 @@ class SOCDashboard:
     def render_ioc_panel(
         self, iocs: dict[str, list[Any]], chat_state: dict[str, Any] | None = None
     ) -> None:
-        """Display IoCs grouped by category with extracted values and known/new status.
-
-        Categories: Cryptocurrency Wallets, Phishing Domains, Phone Numbers,
-        Mule Bank Accounts.
-        """
+        """Display IoCs grouped by category with extracted values and known/new status."""
         import streamlit as st
-
-        st.subheader("🎯 Indicators of Compromise")
 
         # Default empty structure
         crypto_wallets = iocs.get("cryptocurrency_wallets", [])
@@ -313,16 +302,11 @@ class SOCDashboard:
     def render_notification_log(
         self, notifications: list[dict[str, Any] | Any]
     ) -> None:
-        """Display mock AWS notifications with timestamp, severity, type, and summary.
-
-        Notifications are displayed in reverse chronological order (newest first).
-        """
+        """Display mock AWS notifications with timestamp, severity, type, and summary."""
         import streamlit as st
 
-        st.subheader("🔔 Notification Log")
-
         if not notifications:
-            st.info("No notifications generated yet.")
+            st.caption("No notifications generated yet.")
             return
 
         for notification in reversed(notifications):
