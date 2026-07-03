@@ -1,8 +1,9 @@
 """Mock AWS notification module for IoC-triggered GuardDuty findings and WAF IP set updates."""
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
+from models import APP_TIMEZONE
 from models.aws_models import GuardDutyFinding, MockAWSPayload, WAFPayload
 from models.ioc_models import (
     BaseIoC,
@@ -34,7 +35,7 @@ class NotificationModule:
                 waf_payload = self.generate_waf_payload(ioc)
                 return MockAWSPayload(
                     payload_type="waf_ipset_update",
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(APP_TIMEZONE),
                     severity="HIGH",
                     summary=f"WAF IP set update: blocked phishing domain {ioc.domain}",
                     raw_payload=waf_payload.model_dump(),
@@ -48,7 +49,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(APP_TIMEZONE),
                     severity="HIGH",
                     summary=(
                         f"GuardDuty finding: cryptocurrency wallet detected"
@@ -65,7 +66,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(APP_TIMEZONE),
                     severity="CRITICAL",
                     summary=(
                         f"GuardDuty finding: mule bank account detected"
@@ -82,7 +83,7 @@ class NotificationModule:
                 )
                 return MockAWSPayload(
                     payload_type="guardduty_finding",
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(APP_TIMEZONE),
                     severity="MEDIUM",
                     summary=(
                         f"GuardDuty finding: suspicious phone number detected"
