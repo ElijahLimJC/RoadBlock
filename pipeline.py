@@ -500,8 +500,23 @@ def _run_extraction_pipeline(
         cache = state.get("vt_lookup_cache", {})
         vt_results = []
 
+        logger.info(
+            "Extraction found %d IoCs, VT client configured: %s",
+            len(extraction_result.iocs),
+            virustotal_client is not None
+            and virustotal_client.is_configured()
+            if virustotal_client
+            else False,
+        )
+
         if virustotal_client is not None and virustotal_client.is_configured():
             try:
+                # Windows requires ProactorEventLoop for subprocess spawning
+                import sys
+                if sys.platform == "win32":
+                    asyncio.set_event_loop_policy(
+                        asyncio.WindowsProactorEventLoopPolicy()
+                    )
                 vt_loop = asyncio.new_event_loop()
                 try:
                     vt_results = vt_loop.run_until_complete(
