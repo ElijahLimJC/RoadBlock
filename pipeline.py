@@ -538,15 +538,15 @@ def _run_extraction_pipeline(
                     vt_loop.close()
                 state["vt_lookup_cache"] = cache
                 state["vt_server_status"] = "connected"
-                print(f"[PIPELINE] VT returned {len(vt_results)} results")
+                print(f"[PIPELINE] VT returned {len(vt_results)} results", file=sys.stderr, flush=True)
             except asyncio.TimeoutError:
                 logger.warning("VirusTotal batch lookup timed out after 60s")
                 state["vt_server_status"] = "timeout"
-                print("[PIPELINE] VT TIMEOUT")
+                print("[PIPELINE] VT TIMEOUT", file=sys.stderr, flush=True)
             except Exception as e:
                 logger.warning("VirusTotal batch lookup failed: %s", e)
                 state["vt_server_status"] = "error"
-                print(f"[PIPELINE] VT ERROR: {e}")
+                print(f"[PIPELINE] VT ERROR: {e}", file=sys.stderr, flush=True)
 
         # --- Store IoCs and generate notifications for NEW ones ---
         for i, ioc in enumerate(extraction_result.iocs):
