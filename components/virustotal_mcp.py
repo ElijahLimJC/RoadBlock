@@ -4,10 +4,12 @@ Connects to the VirusTotal MCP server (@burtthecoder/mcp-virustotal) via the
 MCP SDK to enrich extracted IoCs with threat intelligence data. Maps VT
 responses into RoadBlock's IoCLookupResult model.
 
-Supports domain, IP, URL, and file hash lookups with graceful degradation
-on connection failures or timeouts.
+Spawns the MCP server process ONCE per batch to avoid repeated 10-second
+npx startup costs. Supports domain, IP, URL, and file hash lookups with
+graceful degradation on connection failures or timeouts.
 """
 
+import json
 import logging
 import os
 import time
@@ -22,9 +24,6 @@ from models.lookup_models import IoCLookupResult, LookupStatus
 
 logger = logging.getLogger(__name__)
 
-# Timeout for individual VT lookups (seconds)
-_VT_LOOKUP_TIMEOUT = 30.0
-
 
 class VirusTotalMCPClient:
     """Client that queries VirusTotal via MCP server for IoC enrichment.
@@ -35,8 +34,8 @@ class VirusTotalMCPClient:
     - get_url_report: for URL IoCs
     - search_vt: for crypto wallets, phone numbers, bank accounts (general search)
 
-    Graceful degradation: any MCP connection or tool call failure results
-    in lookup_status=UNKNOWN, is_known=False.
+    Spawns the MCP server process once per batch_lookup call. Individual
+    lookup_ioc calls also spawn a process (use batch_lookup for efficiency).
     """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -66,6 +65,9 @@ class VirusTotalMCPClient:
     ) -> IoCLookupResult:
         """Look up a single IoC against VirusTotal via MCP.
 
+        Note: This spawns an MCP server process. For multiple IoCs, prefer
+        batch_lookup which reuses a single server process.
+
         Args:
             ioc: The IoC to enrich.
             cache: Optional session-level cache keyed by extracted_value.
@@ -75,7 +77,6 @@ class VirusTotalMCPClient:
         """
         ioc_value = ioc.extracted_value
 
-        # Check cache first
         if cache is not None and ioc_value in cache:
             return cache[ioc_value]
 
@@ -86,19 +87,28 @@ class VirusTotalMCPClient:
             return self._unknown_result(ioc_value, ioc.category, 0.0, cache)
 
         try:
-            result = await self._call_vt_tool(ioc)
+            tool_name, tool_args = self._resolve_tool(ioc)
+            if tool_name is None:
+                return self._unknown_result(
+                    ioc_value, ioc.category, 0.0, cache
+                )
+
+            async with stdio_client(self._server_params) as (read, write):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    raw_result = await self._call_tool(session, tool_name, tool_args)
+
             elapsed_ms = (time.perf_counter() - start_time) * 1000
 
-            if result is None:
+            if raw_result is None:
                 return self._unknown_result(
                     ioc_value, ioc.category, elapsed_ms, cache
                 )
 
             lookup_result = self._parse_vt_response(
-                result, ioc_value, ioc.category, elapsed_ms
+                raw_result, ioc_value, ioc.category, elapsed_ms
             )
 
-            # Cache the result
             if cache is not None:
                 cache[ioc_value] = lookup_result
 
@@ -120,8 +130,9 @@ class VirusTotalMCPClient:
     ) -> list[IoCLookupResult]:
         """Batch lookup for multiple IoCs against VirusTotal.
 
-        Processes IoCs sequentially to respect VT rate limits (4 req/min
-        on free tier). Uses cache to avoid duplicate lookups.
+        Spawns the MCP server process ONCE and runs all tool calls within
+        that single session. This avoids the ~10 second npx startup cost
+        per IoC.
 
         Args:
             iocs: List of IoCs to enrich.
@@ -130,52 +141,140 @@ class VirusTotalMCPClient:
         Returns:
             List of IoCLookupResult, one per input IoC.
         """
-        results: list[IoCLookupResult] = []
-        for ioc in iocs:
-            result = await self.lookup_ioc(ioc, cache)
-            results.append(result)
-        return results
+        if not self.is_configured():
+            logger.warning("VirusTotal API key not configured, skipping batch")
+            return [
+                self._unknown_result(ioc.extracted_value, ioc.category, 0.0, cache)
+                for ioc in iocs
+            ]
 
-    async def _call_vt_tool(self, ioc: BaseIoC) -> Optional[dict]:
-        """Call the appropriate VT MCP tool based on IoC category.
+        # Filter out cached IoCs
+        uncached_indices: list[int] = []
+        results: list[Optional[IoCLookupResult]] = [None] * len(iocs)
 
-        Args:
-            ioc: The IoC to look up.
+        for i, ioc in enumerate(iocs):
+            if cache is not None and ioc.extracted_value in cache:
+                results[i] = cache[ioc.extracted_value]
+            else:
+                uncached_indices.append(i)
 
-        Returns:
-            Parsed response dict from the MCP tool, or None on failure.
-        """
-        tool_name, tool_args = self._resolve_tool(ioc)
-        if tool_name is None:
-            return None
+        if not uncached_indices:
+            return results  # type: ignore[return-value]
 
+        # Spawn MCP server once for all uncached lookups
+        batch_start = time.perf_counter()
         try:
             async with stdio_client(self._server_params) as (read, write):
                 async with ClientSession(read, write) as session:
                     await session.initialize()
+                    logger.info(
+                        "VT MCP session started, processing %d IoCs",
+                        len(uncached_indices),
+                    )
 
-                    result = await session.call_tool(tool_name, tool_args)
+                    for idx in uncached_indices:
+                        ioc = iocs[idx]
+                        ioc_start = time.perf_counter()
 
-                    # MCP tool results come as content list
-                    if result and result.content:
-                        for content_block in result.content:
-                            if hasattr(content_block, "text"):
-                                import json
-                                try:
-                                    return json.loads(content_block.text)
-                                except (json.JSONDecodeError, TypeError):
-                                    # Return raw text wrapped in dict
-                                    return {"raw_response": content_block.text}
-                    return None
+                        tool_name, tool_args = self._resolve_tool(ioc)
+                        if tool_name is None:
+                            results[idx] = self._unknown_result(
+                                ioc.extracted_value, ioc.category, 0.0, cache
+                            )
+                            continue
+
+                        try:
+                            raw_result = await self._call_tool(
+                                session, tool_name, tool_args
+                            )
+                            elapsed_ms = (
+                                time.perf_counter() - ioc_start
+                            ) * 1000
+
+                            if raw_result is None:
+                                results[idx] = self._unknown_result(
+                                    ioc.extracted_value,
+                                    ioc.category,
+                                    elapsed_ms,
+                                    cache,
+                                )
+                            else:
+                                lookup_result = self._parse_vt_response(
+                                    raw_result,
+                                    ioc.extracted_value,
+                                    ioc.category,
+                                    elapsed_ms,
+                                )
+                                results[idx] = lookup_result
+                                if cache is not None:
+                                    cache[ioc.extracted_value] = lookup_result
+
+                            logger.debug(
+                                "VT lookup for %s: %s (%.0fms)",
+                                ioc.extracted_value,
+                                results[idx].lookup_status.value,  # type: ignore
+                                elapsed_ms,
+                            )
+
+                        except Exception as e:
+                            elapsed_ms = (
+                                time.perf_counter() - ioc_start
+                            ) * 1000
+                            logger.warning(
+                                "VT tool call failed for %s: %s",
+                                ioc.extracted_value,
+                                e,
+                            )
+                            results[idx] = self._unknown_result(
+                                ioc.extracted_value,
+                                ioc.category,
+                                elapsed_ms,
+                                cache,
+                            )
 
         except Exception as e:
+            # MCP server failed to start or session crashed
+            total_ms = (time.perf_counter() - batch_start) * 1000
             logger.warning(
-                "MCP tool call failed (tool=%s, ioc=%s): %s",
-                tool_name,
-                ioc.extracted_value,
-                e,
+                "VT MCP session failed after %.0fms: %s", total_ms, e
             )
-            return None
+            for idx in uncached_indices:
+                if results[idx] is None:
+                    results[idx] = self._unknown_result(
+                        iocs[idx].extracted_value,
+                        iocs[idx].category,
+                        total_ms,
+                        cache,
+                    )
+
+        return results  # type: ignore[return-value]
+
+    async def _call_tool(
+        self,
+        session: ClientSession,
+        tool_name: str,
+        tool_args: dict,
+    ) -> Optional[dict]:
+        """Call an MCP tool within an existing session.
+
+        Args:
+            session: Active MCP ClientSession.
+            tool_name: Name of the tool to call.
+            tool_args: Arguments for the tool.
+
+        Returns:
+            Parsed response dict, or None on failure.
+        """
+        result = await session.call_tool(tool_name, tool_args)
+
+        if result and result.content:
+            for content_block in result.content:
+                if hasattr(content_block, "text"):
+                    try:
+                        return json.loads(content_block.text)
+                    except (json.JSONDecodeError, TypeError):
+                        return {"raw_response": content_block.text}
+        return None
 
     def _resolve_tool(self, ioc: BaseIoC) -> tuple[Optional[str], dict]:
         """Determine which VT MCP tool to call for a given IoC.
@@ -192,21 +291,18 @@ class VirusTotalMCPClient:
             return "get_domain_report", {"domain": domain}
 
         elif ioc.category == IoCCategory.CRYPTOCURRENCY_WALLET:
-            # Use search for crypto addresses
             return "search_vt", {
                 "query": ioc.extracted_value,
                 "limit": 5,
             }
 
         elif ioc.category == IoCCategory.PHONE_NUMBER:
-            # VT doesn't natively support phone lookups; use search
             return "search_vt", {
                 "query": ioc.extracted_value,
                 "limit": 5,
             }
 
         elif ioc.category == IoCCategory.MULE_BANK_ACCOUNT:
-            # VT doesn't natively support bank account lookups; use search
             return "search_vt", {
                 "query": ioc.extracted_value,
                 "limit": 5,
@@ -225,21 +321,11 @@ class VirusTotalMCPClient:
 
         Extracts detection stats, reputation, and tags from VT response
         to determine if the IoC is known malicious.
-
-        Args:
-            data: Raw response dict from VT MCP tool.
-            ioc_value: The IoC value looked up.
-            ioc_category: Category of the IoC.
-            elapsed_ms: Lookup duration.
-
-        Returns:
-            IoCLookupResult with enrichment data.
         """
         try:
             # Handle raw text response (non-JSON)
             if "raw_response" in data:
                 raw = data["raw_response"]
-                # If VT returned text mentioning detections, mark as known
                 is_known = any(
                     kw in raw.lower()
                     for kw in ["malicious", "phishing", "malware", "suspicious"]
@@ -257,10 +343,8 @@ class VirusTotalMCPClient:
                 )
 
             # Parse structured VT response
-            # VT domain/IP/URL reports have attributes.last_analysis_stats
             attributes = data.get("data", {}).get("attributes", {})
             if not attributes:
-                # Try top-level attributes (some tools flatten)
                 attributes = data.get("attributes", data)
 
             last_analysis_stats = attributes.get("last_analysis_stats", {})
@@ -268,32 +352,25 @@ class VirusTotalMCPClient:
             suspicious_count = int(last_analysis_stats.get("suspicious", 0))
             total_detections = malicious_count + suspicious_count
 
-            # Reputation score (lower/negative = more malicious)
             reputation = attributes.get("reputation", 0)
-
-            # Determine if known threat
             is_known = total_detections > 0 or reputation < -5
 
-            # Extract tags
             tags = attributes.get("tags", [])
             if not isinstance(tags, list):
                 tags = []
             tags = ["virustotal"] + [str(t) for t in tags[:10]]
 
-            # Extract reporting sources from last_analysis_results
             reporting_sources = ["VirusTotal"]
             analysis_results = attributes.get("last_analysis_results", {})
             if isinstance(analysis_results, dict):
-                # Get engines that flagged as malicious
                 malicious_engines = [
                     engine
                     for engine, result in analysis_results.items()
                     if isinstance(result, dict)
                     and result.get("category") == "malicious"
-                ][:5]  # Limit to 5 sources
+                ][:5]
                 reporting_sources.extend(malicious_engines)
 
-            # Determine severity
             if malicious_count >= 10:
                 severity = "critical"
             elif malicious_count >= 5:
@@ -303,10 +380,8 @@ class VirusTotalMCPClient:
             else:
                 severity = "clean"
 
-            # Times reported = total positive detections
             times_reported = total_detections
 
-            # First seen date
             first_seen = None
             creation_date = attributes.get("creation_date")
             if creation_date and isinstance(creation_date, (int, float)):
