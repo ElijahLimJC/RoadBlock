@@ -18,6 +18,8 @@ import streamlit as st
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field
 
+from models import APP_TIMEZONE
+
 from components.email_ingestion import EmailIngestionModule
 from components.imap_client import IMAPClient
 from components.virustotal_mcp import VirusTotalMCPClient
@@ -391,14 +393,14 @@ def process_scammer_message(
         scammer_msg = ChatMessage(
             sender="scammer",
             content=sanitized_message,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(APP_TIMEZONE),
             was_sanitized=len(scan_result.detected_patterns) > 0,
             was_blocked=is_blocked,
         )
         persona_msg = ChatMessage(
             sender="persona",
             content=response_content,
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(APP_TIMEZONE),
         )
         st.session_state["conversation_history"].append(scammer_msg)
         st.session_state["conversation_history"].append(persona_msg)
@@ -699,7 +701,7 @@ def flush_email_ingestion_state() -> None:
             _chat_msg = ChatMessage(
                 sender=_msg_data.get("sender", "scammer"),
                 content=_msg_data.get("content", ""),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(APP_TIMEZONE),
             )
             st.session_state["conversation_history"].append(_chat_msg)
 
