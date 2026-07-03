@@ -32,13 +32,14 @@ if st.session_state.get("email_ingestion_module") is not None:
     # Merge staged conversation messages
     _staged_msgs = st.session_state.email_ingestion.pop("_staged_messages", [])
     if _staged_msgs:
-        from datetime import datetime, timezone
+        from datetime import datetime
+        from models import APP_TIMEZONE
 
         for _msg_data in _staged_msgs:
             _chat_msg = ChatMessage(
                 sender=_msg_data.get("sender", "scammer"),
                 content=_msg_data.get("content", ""),
-                timestamp=datetime.now(timezone.utc),
+                timestamp=datetime.now(APP_TIMEZONE),
             )
             st.session_state["conversation_history"].append(_chat_msg)
 
