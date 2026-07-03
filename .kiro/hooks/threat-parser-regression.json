@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Threat Parser Regression Check",
+      "description": "Runs a quick regression test against static scam data whenever the threat parser is saved, catching breakages before they hit the Streamlit runtime.",
+      "trigger": "PostFileSave",
+      "matcher": ".*threat_parser\\.py$",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/9Elijah_Lim/Downloads/kiro && conda run -n roadblock python settings/scripts/threat_parser_regression.py"
+      },
+      "enabled": true
+    }
+  ]
+}

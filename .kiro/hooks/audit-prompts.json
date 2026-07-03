@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Prompt Security Audit",
+      "description": "Verifies persona_engine.py prompt guardrails whenever the file is modified",
+      "trigger": "PostFileSave",
+      "matcher": ".*persona_engine\\.py$",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/9Elijah_Lim/Downloads/kiro && conda run -n roadblock python settings/scripts/check_prompt_boundaries.py"
+      },
+      "enabled": true
+    }
+  ]
+}

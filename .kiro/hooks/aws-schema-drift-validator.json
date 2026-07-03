@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "AWS Schema Drift Validator",
+      "description": "On save of notification_module.py, audits the mock AWS payload generation functions for schema drift: verifies that dictionary keys match the exact casing and structure expected by AWS WAF and GuardDuty APIs (e.g., SchemaVersion, FindingType, IPSetId), checks UUID format compliance, and ensures all keys consumed by the dashboard rendering code are present in generated payloads.",
+      "trigger": "PostFileSave",
+      "matcher": "components/notification_module\\.py$",
+      "action": {
+        "type": "agent",
+        "prompt": "The notification_module.py file was just saved. Audit it for AWS schema drift that could cause KeyError crashes in the dashboard. Check for:\n\n1. **GuardDuty Finding schema keys** — Verify exact PascalCase key names match the real API shape: `SchemaVersion`, `Id` (valid UUID v4 format), `Type`, `Region`, `AccountId`, `Resource`, `Service`, `Severity`, `Title`, `Description`, `CreatedAt` (ISO 8601), `UpdatedAt`. Flag any lowercase variants, missing keys, or renamed fields.\n\n2. **WAF IPSet/Rule schema keys** — Verify exact casing: `IPSetId`, `Name`, `IPSetDescriptors` (list of `Type` + `Value` dicts), `ChangeToken`. For WAF rule payloads: `RuleId`, `Predicates`, `Action`. Flag deviations from AWS WAF Classic or WAFv2 structure.\n\n3. **UUID format compliance** — All Id/IPSetId/RuleId/ChangeToken fields must be valid UUID v4 strings (8-4-4-4-12 hex pattern). Flag if using plain strings, integers, or malformed UUIDs.\n\n4. **Cross-reference with models/aws_models.py** — Read the Pydantic models (MockAWSPayload, WAFPayload, GuardDutyFinding) and verify that every field defined in those models is present in the generated dict output. Flag any field the model expects but the generator omits.\n\n5. **Cross-reference with dashboard consumers** — If dashboard/soc_dashboard.py exists, check what keys it reads from notification payloads and verify the generator produces all of them with correct casing.\n\n6. **Type consistency** — Severity should be numeric (0-10 scale), timestamps should be ISO 8601 strings, lists should remain lists (not accidentally flattened to strings).\n\nReport drift as warnings with specific key names, expected vs actual casing, and line references. If the schema is clean, confirm no drift detected."
+      },
+      "enabled": true
+    }
+  ]
+}

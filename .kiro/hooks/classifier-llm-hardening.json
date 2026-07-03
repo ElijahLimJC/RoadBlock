@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Classifier LLM Hardening Audit",
+      "description": "Verifies the scam classifier's Stage 2 LLM call maintains prompt injection defenses (content fencing, ignore-instructions directive, structured output validation, injection fallback handling) whenever the classifier module is modified.",
+      "trigger": "PostFileSave",
+      "matcher": ".*scam_classifier\\.py$",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/9Elijah_Lim/Downloads/kiro && conda run -n roadblock python settings/scripts/check_classifier_llm_hardening.py"
+      },
+      "enabled": true
+    }
+  ]
+}

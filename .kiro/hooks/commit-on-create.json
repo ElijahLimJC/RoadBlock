@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Commit on File Create",
+      "description": "Automatically stages and commits newly created files with a conventional commit message.",
+      "trigger": "PostFileCreate",
+      "matcher": "[^/]*$",
+      "action": {
+        "type": "command",
+        "command": "git add -A && git commit -m \"chore: add new file\""
+      },
+      "enabled": true
+    }
+  ]
+}

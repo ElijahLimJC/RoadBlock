@@ -1,0 +1,17 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Classifier Injection Test Runner",
+      "description": "Runs prompt injection and hardening tests against the scam classifier whenever the classifier module is edited. Catches regressions in delimiter fencing, structured output enforcement, and injection fallback handling.",
+      "trigger": "PostFileSave",
+      "matcher": ".*scam_classifier\\.py$",
+      "action": {
+        "type": "command",
+        "command": "cd /Users/9Elijah_Lim/Downloads/kiro && conda run -n roadblock pytest tests/test_scam_classifier.py -k \"injection or hardening or sanitiz\" -x -q 2>&1 | tail -30"
+      },
+      "timeout": 60,
+      "enabled": true
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Commit New File Only",
+      "description": "Automatically stages and commits only the specific newly created file with a conventional commit message.",
+      "trigger": "PostFileCreate",
+      "matcher": "[^/]*$",
+      "action": {
+        "type": "agent",
+        "prompt": "A new file was just created. Stage ONLY that specific file using `git add <filepath>`, then commit it with a message like `chore: add <filename>`. Do not stage any other files."
+      },
+      "enabled": true
+    }
+  ]
+}

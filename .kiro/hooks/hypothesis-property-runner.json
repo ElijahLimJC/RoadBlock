@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Hypothesis Property Auto-Runner",
+      "description": "After each task execution completes, automatically runs the Hypothesis property-based test suite to catch edge-case failures immediately rather than letting them accumulate. Runs pytest with hypothesis statistics so failures are surfaced right after the implementation step that introduced them.",
+      "trigger": "PostTaskExec",
+      "action": {
+        "type": "command",
+        "command": "conda run -n roadblock pytest tests/ --hypothesis-show-statistics -x -q 2>&1 | tail -50"
+      },
+      "timeout": 120,
+      "enabled": true
+    }
+  ]
+}
