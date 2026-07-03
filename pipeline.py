@@ -323,7 +323,8 @@ def process_scammer_message(
         virustotal_client: VirusTotalMCPClient instance (optional, skips VT if None).
     """
     pipeline_start = time.time()
-    print(f"[PIPELINE] process_scammer_message called with: {raw_message[:50]}...")
+    import sys
+    print(f"[PIPELINE] process_scammer_message called with: {raw_message[:50]}...", file=sys.stderr, flush=True)
 
     # Initialize components with defaults if not provided
     if safety_filter is None:
@@ -511,7 +512,8 @@ def _run_extraction_pipeline(
         )
         print(
             f"[PIPELINE] Extracted {len(extraction_result.iocs)} IoCs, "
-            f"VT configured: {virustotal_client is not None and virustotal_client.is_configured() if virustotal_client else False}"
+            f"VT configured: {virustotal_client is not None and virustotal_client.is_configured() if virustotal_client else False}",
+            file=sys.stderr, flush=True
         )
 
         if virustotal_client is not None and virustotal_client.is_configured():
