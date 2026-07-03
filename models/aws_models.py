@@ -48,6 +48,10 @@ class WAFPayload(BaseModel):
         default_factory=lambda: str(uuid.uuid4()),
         description="Unique IP set identifier",
     )
+    Description: str = Field(
+        default="Managed by RoadBlock honeypot pipeline",
+        description="IP set description",
+    )
     Addresses: list[str] = Field(description="List of addresses to block")
     LockToken: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
@@ -79,7 +83,15 @@ class GuardDutyFinding(BaseModel):
     Severity: float = Field(description="Numeric severity score (0-10)")
     Title: str = Field(description="Finding title")
     Description: str = Field(description="Detailed finding description")
+    Id: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique finding identifier",
+    )
     CreatedAt: datetime = Field(
         default_factory=lambda: datetime.now(APP_TIMEZONE),
         description="When the finding was created",
+    )
+    UpdatedAt: datetime = Field(
+        default_factory=lambda: datetime.now(APP_TIMEZONE),
+        description="When the finding was last updated",
     )
