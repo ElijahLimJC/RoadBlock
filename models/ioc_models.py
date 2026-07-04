@@ -150,3 +150,30 @@ class MuleBankAccountIoC(BaseIoC):
 # ref string annotation in BaseIoC.lookup_result above.
 # The model_rebuild() call is performed in lookup_models.py after
 # IoCLookupResult is defined.
+
+
+def ioc_from_dict(data: dict) -> Optional[BaseIoC]:
+    """Reconstruct an IoC model instance from a dict (e.g. from model_dump()).
+
+    Routes to the correct subclass based on the 'category' field.
+
+    Args:
+        data: Dictionary with IoC fields including 'category'.
+
+    Returns:
+        Appropriate IoC subclass instance, or None if category is unrecognized
+        or validation fails.
+    """
+    try:
+        category = data.get("category", "")
+        if category == IoCCategory.CRYPTOCURRENCY_WALLET.value:
+            return CryptoWalletIoC(**data)
+        elif category == IoCCategory.PHISHING_DOMAIN.value:
+            return PhishingDomainIoC(**data)
+        elif category == IoCCategory.PHONE_NUMBER.value:
+            return PhoneNumberIoC(**data)
+        elif category == IoCCategory.MULE_BANK_ACCOUNT.value:
+            return MuleBankAccountIoC(**data)
+        return None
+    except Exception:
+        return None
