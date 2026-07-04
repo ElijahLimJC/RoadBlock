@@ -656,6 +656,7 @@ def flush_email_ingestion_state() -> None:
         _iocs_state = st.session_state.get("iocs", {})
         _new_count = 0
         _known_count = 0
+        _notif_module = NotificationModule()
         for _ioc_data in _staged_iocs:
             _cat = _ioc_data.get("category", "")
             _value = _ioc_data.get("extracted_value")
@@ -683,6 +684,20 @@ def flush_email_ingestion_state() -> None:
             else:
                 _target.append(_ioc_data)
                 _new_count += 1
+
+                # Generate GuardDuty/WAF notification for new IoCs
+                try:
+                    from models.ioc_models import ioc_from_dict
+                    _ioc_obj = ioc_from_dict(_ioc_data)
+                    if _ioc_obj is not None:
+                        _notification = _notif_module.generate_notification(_ioc_obj)
+                        st.session_state["notifications"].append(_notification)
+                except Exception as _e:
+                    logger.warning(
+                        "Notification generation failed for email IoC %s: %s",
+                        _value,
+                        _e,
+                    )
 
         st.session_state["iocs"] = _iocs_state
         if _new_count > 0:
